@@ -1,5 +1,4 @@
 import axios from 'axios';
-import * as cheerio from 'cheerio';
 
 // 🔧 Функция построения параметров фильтров
 function buildAttrsParams({ backdrop, model, symbol }) {
@@ -26,6 +25,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
 
   try {
     const { data } = await axios.get(url, {
+      timeout: 1000,
       headers: {
         'User-Agent': 'Mozilla/5.0',
         'Referer': 'https://marketapp.ws/',
@@ -33,26 +33,36 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
       }
     });
 
-    const $ = cheerio.load(data);
-    const rows = $('tr').toArray();
-    const nftResults = [];
+    // Регулярные выражения для извлечения данных из HTML
+    const rows = [];
+    const regex = /<tr.*?>(.*?)<\/tr>/g;
+    let match;
+    while ((match = regex.exec(data)) !== null) {
+      rows.push(match[1]);
+    }
 
     const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
+    const nftResults = [];
 
-    for (const el of rows) {
+    for (const row of rows) {
       if (nftResults.length >= limit) break;
 
-      const $el = $(el);
+      // Извлекаем нужные данные с помощью регулярных выражений
+      const nameMatch = row.match(/<div class="table-cell-value tm-value">([^<]+)<\/div>/);
+      const priceMatch = row.match(/data-nft-price="([\d.]+)"/);
+      const nftAddressMatch = row.match(/data-nft-address="([^"]+)"/);
+      const providerMatch = row.match(/<div class="table-cell-status-thin tm-status-market">([^<]+)<\/div>/);
 
-      const name = $el.find('div.table-cell-value.tm-value').first().text().trim();
-      const priceStr = $el.find('span[data-nft-price]').attr('data-nft-price');
-      const price = priceStr ? parseFloat(priceStr) : null;
-      const nftAddress = $el.find('span[data-nft-address]').attr('data-nft-address');
-      const provider = $el.find('div.table-cell-status-thin.tm-status-market').text().trim();
+      const name = nameMatch ? nameMatch[1].trim() : null;
+      const price = priceMatch ? parseFloat(priceMatch[1]) : null;
+      const nftAddress = nftAddressMatch ? nftAddressMatch[1] : null;
+      const provider = providerMatch ? providerMatch[1].trim() : null;
 
+      // Проверка на валидность данных
       if (!allowedProviders.includes(provider)) continue;
       if (!name || !price || !nftAddress) continue;
 
+      // Формируем slug
       const slug = name.toLowerCase()
         .replace(/[^a-z0-9\s#]/g, '')
         .replace(/\s+/g, '')
