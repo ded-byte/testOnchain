@@ -1,7 +1,13 @@
-import axios from 'axios';
+import { request, Agent } from 'undici';
 import { parseDocument } from 'htmlparser2';
-import { getAttributeValue, textContent } from 'domutils';
-import { Element, isTag } from 'domhandler';
+import { findAll, getAttributeValue, textContent } from 'domutils';
+
+const agent = new Agent({
+  keepAliveTimeout: 10_000,
+  keepAliveMaxTimeout: 15_000,
+  connections: 10,
+  pipelining: 1,
+});
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
@@ -33,57 +39,47 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
   const attrsParams = buildAttrsParams(filters);
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
 
-  const { data: html } = await axios.get(url, {
-    responseType: 'text',
-    decompress: false,
+  const { body } = await request(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0',
       'Accept': 'text/html',
     },
+    dispatcher: agent,
   });
 
+  const html = await body.text();
   const dom = parseDocument(html);
+  const rows = findAll(el => el.name === 'tr', dom.children);
+
+  const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
   const results = [];
-  const allowedProviders = new Set(['Marketapp', 'Getgems', 'Fragment']);
 
-  const stack = [...dom.children];
+  for (const row of rows) {
+    if (results.length >= limit) break;
 
-  while (stack.length && results.length < limit) {
-    const el = stack.pop();
+    const priceEl = findAll(el => el.attribs?.['data-nft-price'], [row])[0];
+    const addrEl = findAll(el => el.attribs?.['data-nft-address'], [row])[0];
+    const nameEl = findAll(el =>
+      el.name === 'div' &&
+      el.attribs?.class?.includes('table-cell-value'), [row])[0];
+    const providerEl = findAll(el =>
+      el.name === 'div' &&
+      el.attribs?.class?.includes('table-cell-status-thin'), [row])[0];
 
-    if (!isTag(el)) continue;
+    const price = priceEl ? parseFloat(getAttributeValue(priceEl, 'data-nft-price')) : null;
+    const nftAddress = addrEl ? getAttributeValue(addrEl, 'data-nft-address') : null;
+    const name = nameEl ? textContent(nameEl).trim() : null;
+    const provider = providerEl ? textContent(providerEl).trim() : null;
 
-    if (el.name === 'tr') {
-      let price = null, nftAddress = null, name = null, provider = null;
+    if (!price || !nftAddress || !name || !allowedProviders.includes(provider)) continue;
 
-      for (const child of el.children || []) {
-        if (!isTag(child)) continue;
-
-        const attrs = child.attribs || {};
-        if (attrs['data-nft-price']) price = parseFloat(attrs['data-nft-price']);
-        if (attrs['data-nft-address']) nftAddress = attrs['data-nft-address'];
-
-        const cls = attrs.class || '';
-        if (!name && cls.includes('table-cell-value')) {
-          name = textContent(child).trim();
-        }
-        if (!provider && cls.includes('table-cell-status-thin')) {
-          provider = textContent(child).trim();
-        }
-      }
-
-      if (price && nftAddress && name && allowedProviders.has(provider)) {
-        results.push({
-          name,
-          slug: slugify(name),
-          price,
-          nftAddress,
-          provider,
-        });
-      }
-    } else if (el.children?.length) {
-      stack.push(...el.children);
-    }
+    results.push({
+      name,
+      slug: slugify(name),
+      price,
+      nftAddress,
+      provider
+    });
   }
 
   return results;
