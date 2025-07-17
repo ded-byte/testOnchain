@@ -1,14 +1,20 @@
-import { request } from 'undici';
-import * as cheerio from 'cheerio';
+import axios from 'axios';
+import { parseDocument } from 'htmlparser2';
+import { getAttributeValue, textContent } from 'domutils';
+import { Element, isTag } from 'domhandler';
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
   const normalize = (v) => typeof v === 'string' ? v.trim().toLowerCase() : '';
 
   const params = [];
-  if (normalize(backdrop) && backdrop.toLowerCase() !== 'all') params.push(`attrs=Backdrop___${encode(backdrop)}`);
-  if (normalize(model) && model.toLowerCase() !== 'all') params.push(`attrs=Model___${encode(model)}`);
-  if (normalize(symbol) && symbol.toLowerCase() !== 'all') params.push(`attrs=Symbol___${encode(symbol)}`);
+  const normBackdrop = normalize(backdrop);
+  const normModel = normalize(model);
+  const normSymbol = normalize(symbol);
+
+  if (normBackdrop && normBackdrop !== 'all') params.push(`attrs=Backdrop___${encode(backdrop)}`);
+  if (normModel && normModel !== 'all') params.push(`attrs=Model___${encode(model)}`);
+  if (normSymbol && normSymbol !== 'all') params.push(`attrs=Symbol___${encode(symbol)}`);
 
   return params.join('&');
 }
@@ -27,36 +33,58 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
   const attrsParams = buildAttrsParams(filters);
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
 
-  const { body } = await request(url, {
+  const { data: html } = await axios.get(url, {
+    responseType: 'text',
+    decompress: false,
     headers: {
       'User-Agent': 'Mozilla/5.0',
       'Accept': 'text/html',
     },
   });
-  const html = await body.text();
-  const $ = cheerio.load(html);
 
-  const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
+  const dom = parseDocument(html);
   const results = [];
+  const allowedProviders = new Set(['Marketapp', 'Getgems', 'Fragment']);
 
-  $('tr').each((_, el) => {
-    if (results.length >= limit) return false;
+  const stack = [...dom.children];
 
-    const price = parseFloat($(el).find('[data-nft-price]').attr('data-nft-price') || '');
-    const nftAddress = $(el).find('[data-nft-address]').attr('data-nft-address');
-    const name = $(el).find('.table-cell-value').text().trim();
-    const provider = $(el).find('.table-cell-status-thin').text().trim();
+  while (stack.length && results.length < limit) {
+    const el = stack.pop();
 
-    if (!price || !nftAddress || !name || !allowedProviders.includes(provider)) return;
+    if (!isTag(el)) continue;
 
-    results.push({
-      name,
-      slug: slugify(name),
-      price,
-      nftAddress,
-      provider,
-    });
-  });
+    if (el.name === 'tr') {
+      let price = null, nftAddress = null, name = null, provider = null;
+
+      for (const child of el.children || []) {
+        if (!isTag(child)) continue;
+
+        const attrs = child.attribs || {};
+        if (attrs['data-nft-price']) price = parseFloat(attrs['data-nft-price']);
+        if (attrs['data-nft-address']) nftAddress = attrs['data-nft-address'];
+
+        const cls = attrs.class || '';
+        if (!name && cls.includes('table-cell-value')) {
+          name = textContent(child).trim();
+        }
+        if (!provider && cls.includes('table-cell-status-thin')) {
+          provider = textContent(child).trim();
+        }
+      }
+
+      if (price && nftAddress && name && allowedProviders.has(provider)) {
+        results.push({
+          name,
+          slug: slugify(name),
+          price,
+          nftAddress,
+          provider,
+        });
+      }
+    } else if (el.children?.length) {
+      stack.push(...el.children);
+    }
+  }
 
   return results;
 }
@@ -67,6 +95,7 @@ export default async function handler(req, res) {
   }
 
   const { nft, backdrop, model, symbol, limit = 10 } = req.body;
+
   if (!nft || typeof nft !== 'string') {
     return res.status(400).json({ error: 'Field "nft" is required and must be a string.' });
   }
