@@ -1,7 +1,6 @@
 import axios from 'axios';
-import * as cheerio from 'cheerio';
+import htmlparser2 from 'htmlparser2';
 
-// Функция построения параметров фильтров
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
   const normalize = (v) => typeof v === 'string' ? v.trim().toLowerCase() : '';
@@ -18,65 +17,78 @@ function buildAttrsParams({ backdrop, model, symbol }) {
   return params.join('&');
 }
 
-// Оптимизированная версия получения NFT
 async function fetchNFTs(nft, filters = {}, limit = 10) {
   const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
   const attrsParams = buildAttrsParams(filters);
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
 
-  try {
-    const { data } = await axios.get(url, {
-      timeout: 1000,
+  const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
+  const nftResults = [];
+
+  return new Promise((resolve, reject) => {
+    const parser = new htmlparser2.Parser({
+      onopentag(name, attributes) {
+        if (name === 'tr') {
+          this.currentRow = {};
+        } else if (name === 'div' && attributes.class === 'table-cell-value tm-value') {
+          this.insideNameDiv = true;
+        } else if (name === 'span' && 'data-nft-price' in attributes) {
+          this.currentRow.price = parseFloat(attributes['data-nft-price']);
+        } else if (name === 'span' && 'data-nft-address' in attributes) {
+          this.currentRow.nftAddress = attributes['data-nft-address'];
+        } else if (name === 'div' && attributes.class === 'table-cell-status-thin tm-status-market') {
+          this.insideProviderDiv = true;
+        }
+      },
+      ontext(text) {
+        if (this.insideNameDiv) {
+          this.currentRow.name = text.trim();
+        } else if (this.insideProviderDiv) {
+          this.currentRow.provider = text.trim();
+        }
+      },
+      onclosetag(name) {
+        if (name === 'tr' && this.currentRow) {
+          const { name, price, nftAddress, provider } = this.currentRow;
+          if (name && price && nftAddress && allowedProviders.includes(provider)) {
+            const slug = name.toLowerCase()
+              .replace(/[^a-z0-9\s#]/g, '')
+              .replace(/\s+/g, '')
+              .replace(/#/g, '-')
+              .replace(/-+/g, '-')
+              .trim();
+            nftResults.push({ name, slug, price, nftAddress, provider });
+            if (nftResults.length >= limit) {
+              parser.end();
+              resolve(nftResults);
+            }
+          }
+          this.currentRow = null;
+        } else if (name === 'div') {
+          this.insideNameDiv = false;
+          this.insideProviderDiv = false;
+        }
+      },
+      onerror(error) {
+        reject(new Error(`Failed to parse NFTs: ${error.message}`));
+      }
+    }, { decodeEntities: true });
+
+    axios.get(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0',
-        'Accept': 'text/html',
-      }
+        'Referer': 'https://marketapp.ws/',
+        'Accept': 'text/html'
+      },
+      responseType: 'stream'
+    }).then(response => {
+      response.data.pipe(parser);
+    }).catch(error => {
+      reject(new Error(`Failed to fetch NFTs: ${error.message}`));
     });
-
-    const $ = cheerio.load(data);
-    const rows = $('tr').toArray();
-    const nftResults = [];
-
-    const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
-
-    // Параллельная обработка строк с использованием Promise.all
-    const fetchNFTDetails = rows.map(async (el) => {
-      if (nftResults.length >= limit) return null;
-
-      const $el = $(el);
-      const name = $el.find('div.table-cell-value.tm-value').first().text().trim();
-      const priceStr = $el.find('span[data-nft-price]').attr('data-nft-price');
-      const price = priceStr ? parseFloat(priceStr) : null;
-      const nftAddress = $el.find('span[data-nft-address]').attr('data-nft-address');
-      const provider = $el.find('div.table-cell-status-thin.tm-status-market').text().trim();
-
-      if (!allowedProviders.includes(provider)) return null;
-      if (!name || !price || !nftAddress) return null;
-
-      const slug = name.toLowerCase()
-        .replace(/[^a-z0-9\s#]/g, '')
-        .replace(/\s+/g, '')
-        .replace(/#/g, '-')
-        .replace(/-+/g, '-')
-        .trim();
-
-      return { name, slug, price, nftAddress, provider };
-    });
-
-    // Получаем все результаты
-    const results = await Promise.all(fetchNFTDetails);
-    results.forEach(result => {
-      if (result) nftResults.push(result);
-    });
-
-    return nftResults;
-  } catch (error) {
-    console.error('Error fetching NFTs:', error);
-    throw new Error(`Failed to fetch NFTs: ${error.message}`);
-  }
+  });
 }
 
-// 📦 Vercel handler
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed. Use POST.' });
