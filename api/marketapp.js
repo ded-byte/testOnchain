@@ -1,5 +1,5 @@
 import axios from 'axios';
-import htmlparser2 from 'htmlparser2';
+import { Parser } from 'htmlparser2';
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
@@ -26,8 +26,9 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
   const nftResults = [];
 
   return new Promise((resolve, reject) => {
-    const parser = new htmlparser2.Parser({
+    const parser = new Parser({
       onopentag(name, attributes) {
+        console.log('Open tag:', name, attributes);
         if (name === 'tr') {
           this.currentRow = {};
         } else if (name === 'div' && attributes.class === 'table-cell-value tm-value') {
@@ -41,6 +42,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
         }
       },
       ontext(text) {
+        console.log('Text:', text);
         if (this.insideNameDiv) {
           this.currentRow.name = text.trim();
         } else if (this.insideProviderDiv) {
@@ -48,6 +50,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
         }
       },
       onclosetag(name) {
+        console.log('Close tag:', name);
         if (name === 'tr' && this.currentRow) {
           const { name, price, nftAddress, provider } = this.currentRow;
           if (name && price && nftAddress && allowedProviders.includes(provider)) {
@@ -70,6 +73,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
         }
       },
       onerror(error) {
+        console.error('Parser error:', error);
         reject(new Error(`Failed to parse NFTs: ${error.message}`));
       }
     }, { decodeEntities: true });
@@ -80,10 +84,15 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
         'Referer': 'https://marketapp.ws/',
         'Accept': 'text/html'
       },
-      responseType: 'stream'
+      responseType: 'stream',
+      timeout: 10000 // Добавлен таймаут в 10 секунд
     }).then(response => {
+      if (response.status !== 200) {
+        reject(new Error(`Unexpected status code: ${response.status}`));
+      }
       response.data.pipe(parser);
     }).catch(error => {
+      console.error('Axios error:', error);
       reject(new Error(`Failed to fetch NFTs: ${error.message}`));
     });
   });
@@ -108,6 +117,10 @@ export default async function handler(req, res) {
     return res.status(200).json(nfts);
   } catch (error) {
     console.error('Error processing request:', error);
-    return res.status(500).json({ error: 'Internal server error', detail: error.message });
+    return res.status(500).json({
+      error: 'Internal server error',
+      detail: error.message,
+      stack: error.stack // Добавлен стек для отладки
+    });
   }
 }
