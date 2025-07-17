@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-// 🔧 Функция построения параметров фильтров
+// Функция построения параметров фильтров
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
   const normalize = (v) => typeof v === 'string' ? v.trim().toLowerCase() : '';
@@ -17,7 +17,7 @@ function buildAttrsParams({ backdrop, model, symbol }) {
   return params.join('&');
 }
 
-// 🚀 Основная функция для получения NFT
+// Основная функция для получения NFT
 async function fetchNFTs(nft, filters = {}, limit = 10) {
   const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
   const attrsParams = buildAttrsParams(filters);
@@ -28,12 +28,11 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
       timeout: 1000,
       headers: {
         'User-Agent': 'Mozilla/5.0',
-        'Referer': 'https://marketapp.ws/',
         'Accept': 'text/html'
       }
     });
 
-    // Регулярные выражения для извлечения данных из HTML
+    // Регулярные выражения для извлечения строк с NFT
     const rows = [];
     const regex = /<tr.*?>(.*?)<\/tr>/g;
     let match;
@@ -44,8 +43,9 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
     const nftResults = [];
 
-    for (const row of rows) {
-      if (nftResults.length >= limit) break;
+    // Параллельная обработка строк с использованием async/await
+    const processRows = rows.map(async (row) => {
+      if (nftResults.length >= limit) return null;
 
       // Извлекаем нужные данные с помощью регулярных выражений
       const nameMatch = row.match(/<div class="table-cell-value tm-value">([^<]+)<\/div>/);
@@ -59,8 +59,8 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
       const provider = providerMatch ? providerMatch[1].trim() : null;
 
       // Проверка на валидность данных
-      if (!allowedProviders.includes(provider)) continue;
-      if (!name || !price || !nftAddress) continue;
+      if (!allowedProviders.includes(provider)) return null;
+      if (!name || !price || !nftAddress) return null;
 
       // Формируем slug
       const slug = name.toLowerCase()
@@ -70,11 +70,18 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
         .replace(/-+/g, '-')
         .trim();
 
-      nftResults.push({ name, slug, price, nftAddress, provider });
-    }
+      return { name, slug, price, nftAddress, provider };
+    });
+
+    // Получаем все результаты
+    const results = await Promise.all(processRows);
+    results.forEach(result => {
+      if (result) nftResults.push(result);
+    });
 
     return nftResults;
   } catch (error) {
+    console.error('Error fetching NFTs:', error);
     throw new Error(`Failed to fetch NFTs: ${error.message}`);
   }
 }
