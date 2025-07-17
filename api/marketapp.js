@@ -1,6 +1,10 @@
-//filter
+// filter.js
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import pLimit from 'p-limit';
+
+const attrCache = new Map();
+const limitConcurrent = pLimit(5); // максимум 5 параллельных запросов к fragment
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
@@ -19,6 +23,8 @@ function buildAttrsParams({ backdrop, model, symbol }) {
 }
 
 async function fetchNFTAttributes(slug) {
+  if (attrCache.has(slug)) return attrCache.get(slug);
+
   try {
     const { data } = await axios.get(`https://nft.fragment.com/gift/${slug}.json`);
     const attributes = data.attributes || [];
@@ -27,7 +33,9 @@ async function fetchNFTAttributes(slug) {
     const backdrop = attributes.find(attr => attr.trait_type.toLowerCase() === 'backdrop')?.value || 'Unknown';
     const symbol = attributes.find(attr => attr.trait_type.toLowerCase() === 'symbol')?.value || 'Unknown';
 
-    return { model, backdrop, symbol };
+    const result = { model, backdrop, symbol };
+    attrCache.set(slug, result);
+    return result;
   } catch (error) {
     console.error(`Failed to fetch attributes for ${slug}: ${error.message}`);
     return { model: 'Unknown', backdrop: 'Unknown', symbol: 'Unknown' };
@@ -50,12 +58,12 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
 
     const $ = cheerio.load(data);
     const rows = $('tr').toArray();
-    const nftResults = [];
-
     const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
 
+    const tasks = [];
+
     for (const el of rows) {
-      if (nftResults.length >= limit) break;
+      if (tasks.length >= limit) break;
 
       const $el = $(el);
       const name = $el.find('div.table-cell-value.tm-value').first().text().trim();
@@ -74,11 +82,13 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
         .replace(/-+/g, '-')
         .trim();
 
-      const { model, backdrop, symbol } = await fetchNFTAttributes(slug);
-
-      nftResults.push({ name, slug, price, nftAddress, provider, model, backdrop, symbol });
+      tasks.push(limitConcurrent(async () => {
+        const { model, backdrop, symbol } = await fetchNFTAttributes(slug);
+        return { name, slug, price, nftAddress, provider, model, backdrop, symbol };
+      }));
     }
 
+    const nftResults = (await Promise.all(tasks)).filter(Boolean);
     return nftResults;
   } catch (error) {
     throw new Error(`Failed to fetch NFTs: ${error.message}`);
@@ -86,7 +96,9 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed. Use POST.' });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed. Use POST.' });
+  }
 
   const { nft, backdrop, model, symbol, limit = 10 } = req.body;
 
@@ -96,11 +108,12 @@ export default async function handler(req, res) {
 
   try {
     const nfts = await fetchNFTs(nft, { backdrop, model, symbol }, limit);
-    if (nfts.length === 0) return res.status(404).json({ error: `No NFTs found for contract address "${nft}".` });
+    if (nfts.length === 0) {
+      return res.status(404).json({ error: `No NFTs found for contract address "${nft}".` });
+    }
     return res.status(200).json(nfts);
   } catch (error) {
     console.error('Error processing request:', error);
     return res.status(500).json({ error: 'Internal server error', detail: error.message });
   }
 }
-
