@@ -1,4 +1,5 @@
 import axios from 'axios';
+import * as cheerio from 'cheerio';
 
 // Функция построения параметров фильтров
 function buildAttrsParams({ backdrop, model, symbol }) {
@@ -17,7 +18,7 @@ function buildAttrsParams({ backdrop, model, symbol }) {
   return params.join('&');
 }
 
-// Основная функция для получения NFT
+// Оптимизированная версия получения NFT
 async function fetchNFTs(nft, filters = {}, limit = 10) {
   const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
   const attrsParams = buildAttrsParams(filters);
@@ -28,41 +29,30 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
       timeout: 1000,
       headers: {
         'User-Agent': 'Mozilla/5.0',
-        'Accept': 'text/html'
+        'Accept': 'text/html',
       }
     });
 
-    // Регулярные выражения для извлечения строк с NFT
-    const rows = [];
-    const regex = /<tr.*?>(.*?)<\/tr>/g;
-    let match;
-    while ((match = regex.exec(data)) !== null) {
-      rows.push(match[1]);
-    }
-
-    const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
+    const $ = cheerio.load(data);
+    const rows = $('tr').toArray();
     const nftResults = [];
 
-    // Параллельная обработка строк с использованием async/await
-    const processRows = rows.map(async (row) => {
+    const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
+
+    // Параллельная обработка строк с использованием Promise.all
+    const fetchNFTDetails = rows.map(async (el) => {
       if (nftResults.length >= limit) return null;
 
-      // Извлекаем нужные данные с помощью регулярных выражений
-      const nameMatch = row.match(/<div class="table-cell-value tm-value">([^<]+)<\/div>/);
-      const priceMatch = row.match(/data-nft-price="([\d.]+)"/);
-      const nftAddressMatch = row.match(/data-nft-address="([^"]+)"/);
-      const providerMatch = row.match(/<div class="table-cell-status-thin tm-status-market">([^<]+)<\/div>/);
+      const $el = $(el);
+      const name = $el.find('div.table-cell-value.tm-value').first().text().trim();
+      const priceStr = $el.find('span[data-nft-price]').attr('data-nft-price');
+      const price = priceStr ? parseFloat(priceStr) : null;
+      const nftAddress = $el.find('span[data-nft-address]').attr('data-nft-address');
+      const provider = $el.find('div.table-cell-status-thin.tm-status-market').text().trim();
 
-      const name = nameMatch ? nameMatch[1].trim() : null;
-      const price = priceMatch ? parseFloat(priceMatch[1]) : null;
-      const nftAddress = nftAddressMatch ? nftAddressMatch[1] : null;
-      const provider = providerMatch ? providerMatch[1].trim() : null;
-
-      // Проверка на валидность данных
       if (!allowedProviders.includes(provider)) return null;
       if (!name || !price || !nftAddress) return null;
 
-      // Формируем slug
       const slug = name.toLowerCase()
         .replace(/[^a-z0-9\s#]/g, '')
         .replace(/\s+/g, '')
@@ -74,7 +64,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     });
 
     // Получаем все результаты
-    const results = await Promise.all(processRows);
+    const results = await Promise.all(fetchNFTDetails);
     results.forEach(result => {
       if (result) nftResults.push(result);
     });
