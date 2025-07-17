@@ -1,10 +1,5 @@
-// filter.js
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import pLimit from 'p-limit';
-
-const attrCache = new Map();
-const limitConcurrent = pLimit(5); // максимум 5 параллельных запросов к fragment
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
@@ -20,26 +15,6 @@ function buildAttrsParams({ backdrop, model, symbol }) {
   if (normSymbol && normSymbol !== 'all') params.push(`attrs=Symbol___${encode(symbol)}`);
 
   return params.join('&');
-}
-
-async function fetchNFTAttributes(slug) {
-  if (attrCache.has(slug)) return attrCache.get(slug);
-
-  try {
-    const { data } = await axios.get(`https://nft.fragment.com/gift/${slug}.json`);
-    const attributes = data.attributes || [];
-
-    const model = attributes.find(attr => attr.trait_type.toLowerCase() === 'model')?.value || 'Unknown';
-    const backdrop = attributes.find(attr => attr.trait_type.toLowerCase() === 'backdrop')?.value || 'Unknown';
-    const symbol = attributes.find(attr => attr.trait_type.toLowerCase() === 'symbol')?.value || 'Unknown';
-
-    const result = { model, backdrop, symbol };
-    attrCache.set(slug, result);
-    return result;
-  } catch (error) {
-    console.error(`Failed to fetch attributes for ${slug}: ${error.message}`);
-    return { model: 'Unknown', backdrop: 'Unknown', symbol: 'Unknown' };
-  }
 }
 
 async function fetchNFTs(nft, filters = {}, limit = 10) {
@@ -58,12 +33,12 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
 
     const $ = cheerio.load(data);
     const rows = $('tr').toArray();
+    const nftResults = [];
+
     const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
 
-    const tasks = [];
-
     for (const el of rows) {
-      if (tasks.length >= limit) break;
+      if (nftResults.length >= limit) break;
 
       const $el = $(el);
       const name = $el.find('div.table-cell-value.tm-value').first().text().trim();
@@ -82,13 +57,9 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
         .replace(/-+/g, '-')
         .trim();
 
-      tasks.push(limitConcurrent(async () => {
-        const { model, backdrop, symbol } = await fetchNFTAttributes(slug);
-        return { name, slug, price, nftAddress, provider, model, backdrop, symbol };
-      }));
+      nftResults.push({ name, slug, price, nftAddress, provider });
     }
 
-    const nftResults = (await Promise.all(tasks)).filter(Boolean);
     return nftResults;
   } catch (error) {
     throw new Error(`Failed to fetch NFTs: ${error.message}`);
