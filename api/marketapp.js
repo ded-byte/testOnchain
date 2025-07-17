@@ -26,71 +26,131 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
   const nftResults = [];
 
   return new Promise((resolve, reject) => {
-    const parser = new Parser({
-      onopentag(name, attributes) {
-        console.log('Open tag:', name, attributes);
-        if (name === 'tr') {
-          this.currentRow = {};
-        } else if (name === 'div' && attributes.class === 'table-cell-value tm-value') {
-          this.insideNameDiv = true;
-        } else if (name === 'span' && 'data-nft-price' in attributes) {
-          this.currentRow.price = parseFloat(attributes['data-nft-price']);
-        } else if (name === 'span' && 'data-nft-address' in attributes) {
-          this.currentRow.nftAddress = attributes['data-nft-address'];
-        } else if (name === 'div' && attributes.class === 'table-cell-status-thin tm-status-market') {
-          this.insideProviderDiv = true;
-        }
-      },
-      ontext(text) {
-        console.log('Text:', text);
-        if (this.insideNameDiv) {
-          this.currentRow.name = text.trim();
-        } else if (this.insideProviderDiv) {
-          this.currentRow.provider = text.trim();
-        }
-      },
-      onclosetag(name) {
-        console.log('Close tag:', name);
-        if (name === 'tr' && this.currentRow) {
-          const { name, price, nftAddress, provider } = this.currentRow;
-          if (name && price && nftAddress && allowedProviders.includes(provider)) {
-            const slug = name.toLowerCase()
-              .replace(/[^a-z0-9\s#]/g, '')
-              .replace(/\s+/g, '')
-              .replace(/#/g, '-')
-              .replace(/-+/g, '-')
-              .trim();
-            nftResults.push({ name, slug, price, nftAddress, provider });
-            if (nftResults.length >= limit) {
-              parser.end();
-              resolve(nftResults);
-            }
-          }
-          this.currentRow = null;
-        } else if (name === 'div') {
-          this.insideNameDiv = false;
-          this.insideProviderDiv = false;
-        }
-      },
-      onerror(error) {
-        console.error('Parser error:', error);
-        reject(new Error(`Failed to parse NFTs: ${error.message}`));
-      }
-    }, { decodeEntities: true });
-
     axios.get(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0',
         'Referer': 'https://marketapp.ws/',
         'Accept': 'text/html'
       },
-      responseType: 'stream',
-      timeout: 10000 // Добавлен таймаут в 10 секунд
+      responseType: 'stream', // Попытка получить поток
+      timeout: 10000
     }).then(response => {
       if (response.status !== 200) {
         reject(new Error(`Unexpected status code: ${response.status}`));
+        return;
       }
-      response.data.pipe(parser);
+
+      // Проверяем, является ли response.data потоком
+      if (typeof response.data.pipe === 'function') {
+        const parser = new Parser({
+          onopentag(name, attributes) {
+            console.log('Open tag:', name, attributes);
+            if (name === 'tr') {
+              this.currentRow = {};
+            } else if (name === 'div' && attributes.class === 'table-cell-value tm-value') {
+              this.insideNameDiv = true;
+            } else if (name === 'span' && 'data-nft-price' in attributes) {
+              this.currentRow.price = parseFloat(attributes['data-nft-price']);
+            } else if (name === 'span' && 'data-nft-address' in attributes) {
+              this.currentRow.nftAddress = attributes['data-nft-address'];
+            } else if (name === 'div' && attributes.class === 'table-cell-status-thin tm-status-market') {
+              this.insideProviderDiv = true;
+            }
+          },
+          ontext(text) {
+            console.log('Text:', text);
+            if (this.insideNameDiv) {
+              this.currentRow.name = text.trim();
+            } else if (this.insideProviderDiv) {
+              this.currentRow.provider = text.trim();
+            }
+          },
+          onclosetag(name) {
+            console.log('Close tag:', name);
+            if (name === 'tr' && this.currentRow) {
+              const { name, price, nftAddress, provider } = this.currentRow;
+              if (name && price && nftAddress && allowedProviders.includes(provider)) {
+                const slug = name.toLowerCase()
+                  .replace(/[^a-z0-9\s#]/g, '')
+                  .replace(/\s+/g, '')
+                  .replace(/#/g, '-')
+                  .replace(/-+/g, '-')
+                  .trim();
+                nftResults.push({ name, slug, price, nftAddress, provider });
+                if (nftResults.length >= limit) {
+                  parser.end();
+                  resolve(nftResults);
+                }
+              }
+              this.currentRow = null;
+            } else if (name === 'div') {
+              this.insideNameDiv = false;
+              this.insideProviderDiv = false;
+            }
+          },
+          onerror(error) {
+            console.error('Parser error:', error);
+            reject(new Error(`Failed to parse NFTs: ${error.message}`));
+          }
+        }, { decodeEntities: true });
+
+        response.data.pipe(parser);
+      } else {
+        // Если не поток, загружаем данные как текст и парсим вручную
+        let html = '';
+        response.data.on('data', chunk => html += chunk);
+        response.data.on('end', () => {
+          const parser = new Parser({
+            onopentag(name, attributes) {
+              if (name === 'tr') {
+                this.currentRow = {};
+              } else if (name === 'div' && attributes.class === 'table-cell-value tm-value') {
+                this.insideNameDiv = true;
+              } else if (name === 'span' && 'data-nft-price' in attributes) {
+                this.currentRow.price = parseFloat(attributes['data-nft-price']);
+              } else if (name === 'span' && 'data-nft-address' in attributes) {
+                this.currentRow.nftAddress = attributes['data-nft-address'];
+              } else if (name === 'div' && attributes.class === 'table-cell-status-thin tm-status-market') {
+                this.insideProviderDiv = true;
+              }
+            },
+            ontext(text) {
+              if (this.insideNameDiv) {
+                this.currentRow.name = text.trim();
+              } else if (this.insideProviderDiv) {
+                this.currentRow.provider = text.trim();
+              }
+            },
+            onclosetag(name) {
+              if (name === 'tr' && this.currentRow) {
+                const { name, price, nftAddress, provider } = this.currentRow;
+                if (name && price && nftAddress && allowedProviders.includes(provider)) {
+                  const slug = name.toLowerCase()
+                    .replace(/[^a-z0-9\s#]/g, '')
+                    .replace(/\s+/g, '')
+                    .replace(/#/g, '-')
+                    .replace(/-+/g, '-')
+                    .trim();
+                  nftResults.push({ name, slug, price, nftAddress, provider });
+                  if (nftResults.length >= limit) {
+                    resolve(nftResults);
+                  }
+                }
+                this.currentRow = null;
+              } else if (name === 'div') {
+                this.insideNameDiv = false;
+                this.insideProviderDiv = false;
+              }
+            },
+            onerror(error) {
+              console.error('Parser error:', error);
+              reject(new Error(`Failed to parse NFTs: ${error.message}`));
+            }
+          }, { decodeEntities: true });
+          parser.write(html);
+          parser.end();
+        });
+      }
     }).catch(error => {
       console.error('Axios error:', error);
       reject(new Error(`Failed to fetch NFTs: ${error.message}`));
@@ -120,7 +180,7 @@ export default async function handler(req, res) {
     return res.status(500).json({
       error: 'Internal server error',
       detail: error.message,
-      stack: error.stack // Добавлен стек для отладки
+      stack: error.stack
     });
   }
 }
