@@ -61,3 +61,31 @@ export async function fetchNFTs(nft, filters = {}, limit = 10) {
     throw new Error(`Failed to fetch NFTs: ${err.message}`);
   }
 }
+
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed. Use POST.' });
+  }
+
+  const { nft, backdrop, model, symbol, limit = 10 } = req.body;
+
+  if (!nft || typeof nft !== 'string') {
+    return res.status(400).json({ error: 'Field "nft" is required and must be a string.' });
+  }
+
+  try {
+    const nfts = await fetchNFTs(nft, { backdrop, model, symbol }, limit);
+    if (nfts.length === 0) {
+      return res.status(404).json({ error: `No NFTs found for contract address "${nft}".` });
+    }
+    return res.status(200).json(nfts);
+  } catch (error) {
+    console.error('Error processing request:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      detail: error.message,
+      stack: error.stack
+    });
+  }
+}
