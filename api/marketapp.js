@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
+// 🔧 Функция построения параметров фильтров
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
   const normalize = (v) => typeof v === 'string' ? v.trim().toLowerCase() : '';
@@ -17,6 +18,7 @@ function buildAttrsParams({ backdrop, model, symbol }) {
   return params.join('&');
 }
 
+// 🚀 Основная функция для получения NFT
 async function fetchNFTs(nft, filters = {}, limit = 10) {
   const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
   const attrsParams = buildAttrsParams(filters);
@@ -41,6 +43,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
       if (nftResults.length >= limit) break;
 
       const $el = $(el);
+
       const name = $el.find('div.table-cell-value.tm-value').first().text().trim();
       const priceStr = $el.find('span[data-nft-price]').attr('data-nft-price');
       const price = priceStr ? parseFloat(priceStr) : null;
@@ -66,6 +69,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
   }
 }
 
+// 📦 Vercel handler
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed. Use POST.' });
