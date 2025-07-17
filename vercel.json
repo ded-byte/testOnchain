@@ -4,6 +4,6 @@
     { "src": "api/marketapp.js", "use": "@vercel/node" }
   ],
   "routes": [
-    { "src": "/api/marketapp", "dest": "api/marketapp.js", "methods": ["POST", "GET"] }
+    { "src": "/api/filter", "dest": "api/marketapp.js", "methods": ["POST", "GET"] }
   ]
 }
