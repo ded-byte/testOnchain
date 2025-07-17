@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "api/marketapp.js", "use": "@vercel/node" }
+  ],
+  "routes": [
+    { "src": "/api/marketapp", "dest": "api/marketapp.js", "methods": ["POST", "GET"] }
+  ]
+}
