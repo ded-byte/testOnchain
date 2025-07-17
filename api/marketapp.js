@@ -1,5 +1,6 @@
 import axios from 'axios';
-import { parse } from 'node-html-parser';
+import { parseDocument } from 'htmlparser2';
+import { findAll, getAttributeValue, textContent } from 'domutils';
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
@@ -17,51 +18,63 @@ function buildAttrsParams({ backdrop, model, symbol }) {
   return params.join('&');
 }
 
-export async function fetchNFTs(nft, filters = {}, limit = 10) {
+function slugify(name) {
+  return name.toLowerCase()
+    .replace(/[^a-z0-9\s#]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/#/g, '-')
+    .replace(/-+/g, '-')
+    .trim();
+}
+
+async function fetchNFTs(nft, filters = {}, limit = 10) {
   const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
   const attrsParams = buildAttrsParams(filters);
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
 
-  try {
-    const { data } = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0',
-        'Referer': 'https://marketapp.ws/',
-        'Accept': 'text/html'
-      }
+  const { data: html } = await axios.get(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0',
+      'Accept': 'text/html',
+    },
+  });
+
+  const dom = parseDocument(html);
+  const rows = findAll(el => el.name === 'tr', dom.children);
+
+  const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
+  const results = [];
+
+  for (const row of rows) {
+    if (results.length >= limit) break;
+
+    const priceEl = findAll(el => el.attribs?.['data-nft-price'], [row])[0];
+    const addrEl = findAll(el => el.attribs?.['data-nft-address'], [row])[0];
+    const nameEl = findAll(el =>
+      el.name === 'div' &&
+      el.attribs?.class?.includes('table-cell-value'), [row])[0];
+    const providerEl = findAll(el =>
+      el.name === 'div' &&
+      el.attribs?.class?.includes('table-cell-status-thin'), [row])[0];
+
+    const price = priceEl ? parseFloat(getAttributeValue(priceEl, 'data-nft-price')) : null;
+    const nftAddress = addrEl ? getAttributeValue(addrEl, 'data-nft-address') : null;
+    const name = nameEl ? textContent(nameEl).trim() : null;
+    const provider = providerEl ? textContent(providerEl).trim() : null;
+
+    if (!price || !nftAddress || !name || !allowedProviders.includes(provider)) continue;
+
+    results.push({
+      name,
+      slug: slugify(name),
+      price,
+      nftAddress,
+      provider
     });
-
-    const root = parse(data);
-    const rows = root.querySelectorAll('tr');
-    const results = [];
-    const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
-
-    for (const row of rows) {
-      if (results.length >= limit) break;
-
-      const name = row.querySelector('div.table-cell-value.tm-value')?.text.trim();
-      const price = parseFloat(row.querySelector('span[data-nft-price]')?.getAttribute('data-nft-price') || 0);
-      const nftAddress = row.querySelector('span[data-nft-address]')?.getAttribute('data-nft-address');
-      const provider = row.querySelector('div.table-cell-status-thin.tm-status-market')?.text.trim();
-
-      if (!name || !price || !nftAddress || !allowedProviders.includes(provider)) continue;
-
-      const slug = name.toLowerCase()
-        .replace(/[^a-z0-9\s#]/g, '')
-        .replace(/\s+/g, '')
-        .replace(/#/g, '-')
-        .replace(/-+/g, '-')
-        .trim();
-
-      results.push({ name, slug, price, nftAddress, provider });
-    }
-
-    return results;
-  } catch (err) {
-    throw new Error(`Failed to fetch NFTs: ${err.message}`);
   }
-}
 
+  return results;
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -82,10 +95,6 @@ export default async function handler(req, res) {
     return res.status(200).json(nfts);
   } catch (error) {
     console.error('Error processing request:', error);
-    return res.status(500).json({
-      error: 'Internal server error',
-      detail: error.message,
-      stack: error.stack
-    });
+    return res.status(500).json({ error: 'Internal server error', detail: error.message });
   }
 }
