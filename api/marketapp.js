@@ -1,13 +1,6 @@
-import { request, Agent } from 'undici';
+import axios from 'axios';
 import { parseDocument } from 'htmlparser2';
 import { findAll, getAttributeValue, textContent } from 'domutils';
-
-const agent = new Agent({
-  keepAliveTimeout: 10_000,
-  keepAliveMaxTimeout: 15_000,
-  connections: 10,
-  pipelining: 1,
-});
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
@@ -39,15 +32,13 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
   const attrsParams = buildAttrsParams(filters);
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
 
-  const { body } = await request(url, {
+  const { data: html } = await axios.get(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0',
       'Accept': 'text/html',
     },
-    dispatcher: agent,
   });
 
-  const html = await body.text();
   const dom = parseDocument(html);
   const rows = findAll(el => el.name === 'tr', dom.children);
 
