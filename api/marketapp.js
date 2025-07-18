@@ -1,77 +1,100 @@
 import axios from 'axios';
-import { Agent } from 'https';
-import * as htmlparser2 from 'htmlparser2';
+import { parseDocument } from 'htmlparser2';
 import { findAll, getAttributeValue, textContent } from 'domutils';
-import LRU from 'lru-cache';
 
-// ✅ Keep-Alive агент
-const httpsAgent = new Agent({ keepAlive: true });
+function buildAttrsParams({ backdrop, model, symbol }) {
+  const encode = (str) => str.replace(/\s+/g, '+');
+  const normalize = (v) => typeof v === 'string' ? v.trim().toLowerCase() : '';
 
-// ✅ Инстанс axios с кастомным агентом
-const axiosInstance = axios.create({
-  httpsAgent,
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-    'Accept': 'text/html',
-  },
-  timeout: 5000,
-});
+  const params = [];
+  const normBackdrop = normalize(backdrop);
+  const normModel = normalize(model);
+  const normSymbol = normalize(symbol);
 
-// ✅ Кеширование HTML (НЕ данных поиска)
-const htmlCache = new LRU({
-  max: 30,
-  ttl: 1000 * 30, // 30 сек
-});
+  if (normBackdrop && normBackdrop !== 'all') params.push(`attrs=Backdrop___${encode(backdrop)}`);
+  if (normModel && normModel !== 'all') params.push(`attrs=Model___${encode(model)}`);
+  if (normSymbol && normSymbol !== 'all') params.push(`attrs=Symbol___${encode(symbol)}`);
 
-// 🔍 Главная функция парсинга
-export default async function handler(req, res) {
-  const { address } = req.query;
+  return params.join('&');
+}
 
-  if (!address) {
-    return res.status(400).json({ error: 'Missing address parameter' });
+function slugify(name) {
+  return name.toLowerCase()
+    .replace(/[^a-z0-9\s#]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/#/g, '-')
+    .replace(/-+/g, '-')
+    .trim();
+}
+
+async function fetchNFTs(nft, filters = {}, limit = 10) {
+  const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
+  const attrsParams = buildAttrsParams(filters);
+  const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
+
+  const { data: html } = await axios.get(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0',
+      'Accept': 'text/html',
+    },
+  });
+
+  const dom = parseDocument(html);
+  const rows = findAll(el => el.name === 'tr', dom.children);
+
+  const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
+  const results = [];
+
+  for (const row of rows) {
+    if (results.length >= limit) break;
+
+    const priceEl = findAll(el => el.attribs?.['data-nft-price'], [row])[0];
+    const addrEl = findAll(el => el.attribs?.['data-nft-address'], [row])[0];
+    const nameEl = findAll(el =>
+      el.name === 'div' &&
+      el.attribs?.class?.includes('table-cell-value'), [row])[0];
+    const providerEl = findAll(el =>
+      el.name === 'div' &&
+      el.attribs?.class?.includes('table-cell-status-thin'), [row])[0];
+
+    const price = priceEl ? parseFloat(getAttributeValue(priceEl, 'data-nft-price')) : null;
+    const nftAddress = addrEl ? getAttributeValue(addrEl, 'data-nft-address') : null;
+    const name = nameEl ? textContent(nameEl).trim() : null;
+    const provider = providerEl ? textContent(providerEl).trim() : null;
+
+    if (!price || !nftAddress || !name || !allowedProviders.includes(provider)) continue;
+
+    results.push({
+      name,
+      slug: slugify(name),
+      price,
+      nftAddress,
+      provider
+    });
   }
 
-  const url = `https://marketapp.ws/nft/${address}/`;
+  return results;
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed. Use POST.' });
+  }
+
+  const { nft, backdrop, model, symbol, limit = 10 } = req.body;
+
+  if (!nft || typeof nft !== 'string') {
+    return res.status(400).json({ error: 'Field "nft" is required and must be a string.' });
+  }
 
   try {
-    let html;
-
-    if (htmlCache.has(url)) {
-      html = htmlCache.get(url);
-    } else {
-      const { data } = await axiosInstance.get(url);
-      html = data;
-      htmlCache.set(url, html);
+    const nfts = await fetchNFTs(nft, { backdrop, model, symbol }, limit);
+    if (nfts.length === 0) {
+      return res.status(404).json({ error: `No NFTs found for contract address "${nft}".` });
     }
-
-    const dom = htmlparser2.parseDocument(html);
-    const nftTitle = textContent(findAll(el => el.name === 'h1', dom)[0] || '').trim();
-
-    // Цена
-    const priceEl = findAll(el =>
-      el.name === 'span' &&
-      getAttributeValue(el, 'class')?.includes('price'), dom
-    )[0];
-    const price = textContent(priceEl || '').replace(/\s+/g, ' ').trim();
-
-    // Ссылка на коллекцию
-    const collectionAnchor = findAll(el =>
-      el.name === 'a' &&
-      getAttributeValue(el, 'href')?.includes('/collection/'), dom
-    )[0];
-    const collection = {
-      name: textContent(collectionAnchor || '').trim(),
-      href: getAttributeValue(collectionAnchor, 'href') || ''
-    };
-
-    return res.status(200).json({
-      success: true,
-      title: nftTitle,
-      price,
-      collection,
-    });
-
+    return res.status(200).json(nfts);
   } catch (error) {
-    return res.status(500).json({ error: 'Failed to fetch or parse page', details: error.message });
+    console.error('Error processing request:', error);
+    return res.status(500).json({ error: 'Internal server error', detail: error.message });
   }
 }
