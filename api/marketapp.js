@@ -4,11 +4,9 @@ import { findAll, getAttributeValue, textContent } from 'domutils';
 import http from 'http';
 import https from 'https';
 
-// 🔁 Подключаем keep-alive
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
 
-// 🧠 Мягкий кеш
 const cache = new Map();
 
 function buildAttrsParams({ backdrop, model, symbol }) {
@@ -82,7 +80,6 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
   return results;
 }
 
-// 🧠 Обёртка с кешем на 5 секунд
 async function fetchNFTsCached(nft, filters, limit) {
   const key = JSON.stringify({ nft, filters, limit });
   const now = Date.now();
@@ -97,12 +94,11 @@ async function fetchNFTsCached(nft, filters, limit) {
   return data;
 }
 
-// 🔥 Прогрев популярных коллекций (однократный)
 let isWarmedUp = false;
 async function warmUpPopular() {
   if (isWarmedUp) return;
   isWarmedUp = true;
-  const warmUpNft = 'EQDxxxxxx...'; // замените на популярную коллекцию
+  const warmUpNft = 'EQDxxxxxx...';
   try {
     await fetchNFTsCached(warmUpNft, {}, 5);
     console.log(`✅ Warmed up collection ${warmUpNft}`);
@@ -112,7 +108,7 @@ async function warmUpPopular() {
 }
 
 export default async function handler(req, res) {
-  await warmUpPopular(); // фоновой прогрев
+  await warmUpPopular();
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed. Use POST.' });
