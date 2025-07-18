@@ -1,15 +1,17 @@
 import axios from 'axios';
 import { parseDocument } from 'htmlparser2';
 import { findAll, getAttributeValue, textContent } from 'domutils';
-import http from 'http';
-import https from 'https';
 
-// 🔁 Подключаем keep-alive
-const httpAgent = new http.Agent({ keepAlive: true });
-const httpsAgent = new https.Agent({ keepAlive: true });
+async function pingServer() {
+  try {
+    await axios.get('https://marketapp.ws/collection/EQBG-g6ahkAUGWpefWbx-D_9sQ8oWbvy6puuq78U2c4NUDFS/');
+    console.log('✅ Server pinged successfully!');
+  } catch (error) {
+    console.error('❌ Failed to ping server:', error.message);
+  }
+}
 
-// 🧠 Мягкий кеш
-const cache = new Map();
+setInterval(pingServer, 180000);  // Пингование каждые 3 минут
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
@@ -46,12 +48,11 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
       'User-Agent': 'Mozilla/5.0',
       'Accept': 'text/html',
     },
-    httpAgent,
-    httpsAgent,
   });
 
   const dom = parseDocument(html);
   const rows = findAll(el => el.name === 'tr', dom.children);
+
   const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
   const results = [];
 
@@ -60,8 +61,12 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
 
     const priceEl = findAll(el => el.attribs?.['data-nft-price'], [row])[0];
     const addrEl = findAll(el => el.attribs?.['data-nft-address'], [row])[0];
-    const nameEl = findAll(el => el.name === 'div' && el.attribs?.class?.includes('table-cell-value'), [row])[0];
-    const providerEl = findAll(el => el.name === 'div' && el.attribs?.class?.includes('table-cell-status-thin'), [row])[0];
+    const nameEl = findAll(el =>
+      el.name === 'div' &&
+      el.attribs?.class?.includes('table-cell-value'), [row])[0];
+    const providerEl = findAll(el =>
+      el.name === 'div' &&
+      el.attribs?.class?.includes('table-cell-status-thin'), [row])[0];
 
     const price = priceEl ? parseFloat(getAttributeValue(priceEl, 'data-nft-price')) : null;
     const nftAddress = addrEl ? getAttributeValue(addrEl, 'data-nft-address') : null;
@@ -82,38 +87,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
   return results;
 }
 
-// 🧠 Обёртка с кешем на 5 секунд
-async function fetchNFTsCached(nft, filters, limit) {
-  const key = JSON.stringify({ nft, filters, limit });
-  const now = Date.now();
-
-  const cached = cache.get(key);
-  if (cached && now - cached.timestamp < 5000) {
-    return cached.data;
-  }
-
-  const data = await fetchNFTs(nft, filters, limit);
-  cache.set(key, { data, timestamp: now });
-  return data;
-}
-
-// 🔥 Прогрев популярных коллекций (однократный)
-let isWarmedUp = false;
-async function warmUpPopular() {
-  if (isWarmedUp) return;
-  isWarmedUp = true;
-  const warmUpNft = 'EQDxxxxxx...'; // замените на популярную коллекцию
-  try {
-    await fetchNFTsCached(warmUpNft, {}, 5);
-    console.log(`✅ Warmed up collection ${warmUpNft}`);
-  } catch (e) {
-    console.warn(`⚠️ Warm-up failed for ${warmUpNft}:`, e.message);
-  }
-}
-
 export default async function handler(req, res) {
-  await warmUpPopular(); // фоновой прогрев
-
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed. Use POST.' });
   }
@@ -125,13 +99,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    const nfts = await fetchNFTsCached(nft, { backdrop, model, symbol }, limit);
+    const nfts = await fetchNFTs(nft, { backdrop, model, symbol }, limit);
     if (nfts.length === 0) {
       return res.status(404).json({ error: `No NFTs found for contract address "${nft}".` });
     }
     return res.status(200).json(nfts);
   } catch (error) {
-    console.error('❌ Error processing request:', error);
+    console.error('Error processing request:', error);
     return res.status(500).json({ error: 'Internal server error', detail: error.message });
   }
 }
