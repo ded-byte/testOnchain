@@ -2,17 +2,6 @@ import axios from 'axios';
 import { parseDocument } from 'htmlparser2';
 import { findAll, getAttributeValue, textContent } from 'domutils';
 
-async function pingServer() {
-  try {
-    await axios.get('https://marketapp.ws/collection/EQBG-g6ahkAUGWpefWbx-D_9sQ8oWbvy6puuq78U2c4NUDFS/');
-    console.log('✅ Server pinged successfully!');
-  } catch (error) {
-    console.error('❌ Failed to ping server:', error.message);
-  }
-}
-
-setInterval(pingServer, 180000);  // Пингование каждые 3 минут
-
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
   const normalize = (v) => typeof v === 'string' ? v.trim().toLowerCase() : '';
