@@ -63,7 +63,6 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     );
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 1500 });
-
     const html = await page.content();
 
     const nfts = [];
@@ -71,66 +70,80 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     let currentRow = null;
     let currentElement = null;
     let textBuffer = '';
+    let shouldStop = false;
 
-    const parser = new Parser({
-      onopentag(name, attributes) {
-        if (name === 'tr') {
-          currentRow = {};
-        } else if (name === 'td' || name === 'div') {
-          if (attributes['data-nft-price']) {
-            currentRow.price = parseFloat(attributes['data-nft-price']) || null;
-          } else if (attributes['data-nft-address']) {
-            currentRow.nftAddress = attributes['data-nft-address'] || null;
-          } else if (attributes.class && attributes.class.includes('table-cell-value')) {
-            currentElement = 'name';
-          } else if (attributes.class && attributes.class.includes('table-cell-status-thin')) {
-            currentElement = 'provider';
+    const parser = new Parser(
+      {
+        onopentag(name, attributes) {
+          if (shouldStop) return;
+
+          if (name === 'tr') {
+            currentRow = {};
+          } else if (name === 'td' || name === 'div') {
+            if (attributes['data-nft-price']) {
+              currentRow.price = parseFloat(attributes['data-nft-price']) || null;
+            } else if (attributes['data-nft-address']) {
+              currentRow.nftAddress = attributes['data-nft-address'] || null;
+            } else if (attributes.class && attributes.class.includes('table-cell-value')) {
+              currentElement = 'name';
+            } else if (attributes.class && attributes.class.includes('table-cell-status-thin')) {
+              currentElement = 'provider';
+            }
           }
-        }
-      },
-      ontext(text) {
-        if (currentElement) {
-          textBuffer += text.trim();
-        }
-      },
-      onclosetag(name) {
-        if (name === 'tr' && currentRow) {
-          if (currentRow.name && currentRow.price && currentRow.nftAddress && allowedProviders.includes(currentRow.provider)) {
-            nfts.push({
-              name: currentRow.name,
-              slug: currentRow.name
-                .toLowerCase()
-                .replace(/[^a-z0-9\s#]/g, '')
-                .replace(/\s+/g, '')
-                .replace(/#/g, '-')
-                .replace(/-+/g, '-')
-                .trim(),
-              price: currentRow.price,
-              nftAddress: currentRow.nftAddress,
-              provider: currentRow.provider,
-            });
+        },
+        ontext(text) {
+          if (shouldStop) return;
+          if (currentElement) {
+            textBuffer += text.trim();
           }
-          currentRow = null;
-        } else if (name === 'td' || name === 'div') {
-          if (currentElement === 'name') {
-            currentRow.name = textBuffer || null;
-          } else if (currentElement === 'provider') {
-            currentRow.provider = textBuffer || null;
+        },
+        onclosetag(name) {
+          if (shouldStop) return;
+
+          if (name === 'tr' && currentRow) {
+            if (
+              currentRow.name &&
+              currentRow.price &&
+              currentRow.nftAddress &&
+              allowedProviders.includes(currentRow.provider)
+            ) {
+              nfts.push({
+                name: currentRow.name,
+                slug: currentRow.name
+                  .toLowerCase()
+                  .replace(/[^a-z0-9\s#]/g, '')
+                  .replace(/\s+/g, '')
+                  .replace(/#/g, '-')
+                  .replace(/-+/g, '-')
+                  .trim(),
+                price: currentRow.price,
+                nftAddress: currentRow.nftAddress,
+                provider: currentRow.provider,
+              });
+            }
+            currentRow = null;
+
+            if (nfts.length >= limit) {
+              shouldStop = true;
+            }
+          } else if ((name === 'td' || name === 'div') && currentRow) {
+            if (currentElement === 'name') {
+              currentRow.name = textBuffer || null;
+            } else if (currentElement === 'provider') {
+              currentRow.provider = textBuffer || null;
+            }
+            currentElement = null;
+            textBuffer = '';
           }
-          currentElement = null;
-          textBuffer = '';
-        }
-        if (nfts.length >= limit) {
-          parser.end();
-        }
+        },
       },
-    }, { decodeEntities: true });
+      { decodeEntities: true }
+    );
 
     parser.write(html);
     parser.end();
 
     console.log('Fetch time:', Date.now() - startTime, 'ms');
-
     await page.close();
 
     return nfts;
