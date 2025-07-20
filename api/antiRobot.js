@@ -2,20 +2,16 @@ import chromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
 import axios from 'axios';
 import { parseDocument } from 'htmlparser2';
-import { findAll, getAttributeValue, textContent } from 'domutils';
+import { getAttributeValue, textContent } from 'domutils';
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
   const normalize = (v) => typeof v === 'string' ? v.trim().toLowerCase() : '';
 
   const params = [];
-  const normBackdrop = normalize(backdrop);
-  const normModel = normalize(model);
-  const normSymbol = normalize(symbol);
-
-  if (normBackdrop && normBackdrop !== 'all') params.push(`attrs=Backdrop___${encode(backdrop)}`);
-  if (normModel && normModel !== 'all') params.push(`attrs=Model___${encode(model)}`);
-  if (normSymbol && normSymbol !== 'all') params.push(`attrs=Symbol___${encode(symbol)}`);
+  if (normalize(backdrop) !== 'all') params.push(`attrs=Backdrop___${encode(backdrop)}`);
+  if (normalize(model) !== 'all') params.push(`attrs=Model___${encode(model)}`);
+  if (normalize(symbol) !== 'all') params.push(`attrs=Symbol___${encode(symbol)}`);
 
   return params.join('&');
 }
@@ -29,10 +25,19 @@ function slugify(name) {
     .trim();
 }
 
-async function fetchWithRetry(url, options = {}, retries = 3, delay = 1000) {
+async function fetchWithRetry(url, options = {}, retries = 3, delay = 400) {
   for (let i = 0; i < retries; i++) {
     try {
-      const response = await axios.get(url, { timeout: 3000, ...options });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1500);
+
+      const response = await axios.get(url, {
+        signal: controller.signal,
+        timeout: 1500,
+        ...options,
+      });
+
+      clearTimeout(timeout);
       return response;
     } catch (err) {
       if (i === retries - 1) throw err;
@@ -43,35 +48,31 @@ async function fetchWithRetry(url, options = {}, retries = 3, delay = 1000) {
 
 function parseNFTs(html, limit = 10) {
   const dom = parseDocument(html);
-  const rows = findAll(el => el.name === 'tr', dom.children);
-
+  const rows = dom.children.filter((el) => el.name === 'tr' || el.attribs?.['data-nft-price']);
   const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
   const results = [];
 
   for (const row of rows) {
     if (results.length >= limit) break;
 
-    const priceEl = findAll(el => el.attribs?.['data-nft-price'], [row])[0];
-    const addrEl = findAll(el => el.attribs?.['data-nft-address'], [row])[0];
-    const nameEl = findAll(el =>
-      el.name === 'div' && el.attribs?.class?.includes('table-cell-value'), [row])[0];
-    const providerEl = findAll(el =>
-      el.name === 'div' && el.attribs?.class?.includes('table-cell-status-thin'), [row])[0];
+    let price, nftAddress, name, provider;
 
-    const price = priceEl ? parseFloat(getAttributeValue(priceEl, 'data-nft-price')) : null;
-    const nftAddress = addrEl ? getAttributeValue(addrEl, 'data-nft-address') : null;
-    const name = nameEl ? textContent(nameEl).trim() : null;
-    const provider = providerEl ? textContent(providerEl).trim() : null;
+    for (const el of row.children || []) {
+      if (el.attribs?.['data-nft-price']) price = parseFloat(el.attribs['data-nft-price']);
+      if (el.attribs?.['data-nft-address']) nftAddress = el.attribs['data-nft-address'];
+      if (el.attribs?.class?.includes('table-cell-value')) name = textContent(el).trim();
+      if (el.attribs?.class?.includes('table-cell-status-thin')) provider = textContent(el).trim();
+    }
 
-    if (!price || !nftAddress || !name || !allowedProviders.includes(provider)) continue;
-
-    results.push({
-      name,
-      slug: slugify(name),
-      price,
-      nftAddress,
-      provider
-    });
+    if (price && nftAddress && name && allowedProviders.includes(provider)) {
+      results.push({
+        name,
+        slug: slugify(name),
+        price,
+        nftAddress,
+        provider
+      });
+    }
   }
 
   return results;
@@ -90,15 +91,13 @@ async function fetchNFTsWithAxios(nft, filters = {}, limit = 10) {
     },
   });
 
-  const isBlocked = (
+  if (
     html.length < 1000 ||
     html.includes('Just a moment') ||
     html.includes('<meta name="robots" content="noindex"') ||
     html.includes('data:image/gif;base64')
-  );
-
-  if (isBlocked) {
-    throw new Error('Bot protection triggered or invalid page');
+  ) {
+    throw new Error('Bot protection triggered');
   }
 
   return parseNFTs(html, limit);
@@ -140,7 +139,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
   try {
     return await fetchNFTsWithAxios(nft, filters, limit);
   } catch (err) {
-    console.warn('Axios fallback to Puppeteer:', err.message);
+    console.warn('Fallback to Puppeteer:', err.message);
     return await fetchNFTsWithPuppeteer(nft, filters, limit);
   }
 }
@@ -159,7 +158,7 @@ export default async function handler(req, res) {
   try {
     const nfts = await fetchNFTs(nft, { backdrop, model, symbol }, limit);
     if (nfts.length === 0) {
-      return res.status(404).json({ error: `No NFTs found for contract address "${nft}".` });
+      return res.status(404).json({ error: `No NFTs found for collection "${nft}".` });
     }
     return res.status(200).json(nfts);
   } catch (error) {
