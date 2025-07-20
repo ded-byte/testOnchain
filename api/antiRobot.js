@@ -1,4 +1,5 @@
-import puppeteer from 'puppeteer';
+import chromium from 'chrome-aws-lambda';
+import puppeteer from 'puppeteer-core';
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
@@ -30,45 +31,54 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
   const attrsParams = buildAttrsParams(filters);
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
 
-  const browser = await puppeteer.launch();
-  const page = await browser.newPage();
-
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 5000 });
-
-  const html = await page.content();
-  await browser.close();
-
-  const rows = [];
-  const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
-  const results = [];
-
-  const dom = new DOMParser().parseFromString(html, 'text/html');
-  const rowElements = dom.querySelectorAll('tr'); // Предположим, что строки находятся в <tr> элементах
-
-  rowElements.forEach((row) => {
-    if (results.length >= limit) return;
-
-    const priceEl = row.querySelector('[data-nft-price]');
-    const addrEl = row.querySelector('[data-nft-address]');
-    const nameEl = row.querySelector('.table-cell-value');
-    const providerEl = row.querySelector('.table-cell-status-thin');
-
-    const price = priceEl ? parseFloat(priceEl.getAttribute('data-nft-price')) : null;
-    const nftAddress = addrEl ? addrEl.getAttribute('data-nft-address') : null;
-    const name = nameEl ? nameEl.textContent.trim() : null;
-    const provider = providerEl ? providerEl.textContent.trim() : null;
-
-    if (!price || !nftAddress || !name || !allowedProviders.includes(provider)) return;
-
-    results.push({
-      name,
-      slug: slugify(name),
-      price,
-      nftAddress,
-      provider
-    });
+  const browser = await puppeteer.launch({
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath,
+    headless: chromium.headless,
   });
 
+  const page = await browser.newPage();
+  await page.goto(url, { waitUntil: 'networkidle2', timeout: 10000 });
+
+  const results = await page.evaluate((limit) => {
+    const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
+    const rows = Array.from(document.querySelectorAll('tr'));
+    const nfts = [];
+
+    for (const row of rows) {
+      if (nfts.length >= limit) break;
+
+      const priceEl = row.querySelector('[data-nft-price]');
+      const addrEl = row.querySelector('[data-nft-address]');
+      const nameEl = row.querySelector('.table-cell-value');
+      const providerEl = row.querySelector('.table-cell-status-thin');
+
+      const price = priceEl ? parseFloat(priceEl.getAttribute('data-nft-price')) : null;
+      const nftAddress = addrEl ? addrEl.getAttribute('data-nft-address') : null;
+      const name = nameEl ? nameEl.textContent.trim() : null;
+      const provider = providerEl ? providerEl.textContent.trim() : null;
+
+      if (!price || !nftAddress || !name || !allowedProviders.includes(provider)) continue;
+
+      nfts.push({
+        name,
+        slug: name.toLowerCase()
+          .replace(/[^a-z0-9\s#]/g, '')
+          .replace(/\s+/g, '')
+          .replace(/#/g, '-')
+          .replace(/-+/g, '-')
+          .trim(),
+        price,
+        nftAddress,
+        provider
+      });
+    }
+
+    return nfts;
+  }, limit);
+
+  await browser.close();
   return results;
 }
 
