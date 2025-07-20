@@ -27,7 +27,6 @@ function slugify(name) {
     .trim();
 }
 
-// 🔁 Обёртка с таймаутом и повторами
 async function fetchWithRetry(url, options = {}, retries = 3, delay = 1000) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -49,6 +48,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     headers: {
       'User-Agent': 'Mozilla/5.0',
       'Accept': 'text/html',
+      'Referer': 'https://marketapp.ws/collection/${nft}/'
     },
   });
 
