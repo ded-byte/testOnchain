@@ -3,6 +3,9 @@ import puppeteer from 'puppeteer-core';
 import axios from 'axios';
 import { parseDocument } from 'htmlparser2';
 import { findAll, getAttributeValue, textContent } from 'domutils';
+import NodeCache from 'node-cache';
+
+const cache = new NodeCache({ stdTTL: 10, checkperiod: 12 });
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
@@ -83,6 +86,10 @@ function parseNFTs(html, limit = 10) {
 }
 
 async function fetchNFTsWithAxios(nft, filters = {}, limit = 10) {
+  const cacheKey = `${nft}_${JSON.stringify(filters)}`;
+  const cachedData = cache.get(cacheKey);
+  if (cachedData) return cachedData;
+
   const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
   const attrsParams = buildAttrsParams(filters);
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
@@ -104,7 +111,9 @@ async function fetchNFTsWithAxios(nft, filters = {}, limit = 10) {
     throw new Error('Bot protection triggered');
   }
 
-  return parseNFTs(html, limit);
+  const result = parseNFTs(html, limit);
+  cache.set(cacheKey, result);
+  return result;
 }
 
 async function fetchNFTsWithPuppeteer(nft, filters = {}, limit = 10) {
@@ -131,7 +140,7 @@ async function fetchNFTsWithPuppeteer(nft, filters = {}, limit = 10) {
     }
   });
 
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 5000 });
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 3000 });
   const html = await page.content();
   await page.close();
   await browser.close();
