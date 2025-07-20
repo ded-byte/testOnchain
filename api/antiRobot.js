@@ -5,7 +5,7 @@ import { parseDocument } from 'htmlparser2';
 import { findAll, getAttributeValue, textContent } from 'domutils';
 import NodeCache from 'node-cache';
 
-const cache = new NodeCache({ stdTTL: 10, checkperiod: 12 });
+const cache = new NodeCache({ stdTTL: 10, checkperiod: 12 });  // Кэш на 10 секунд
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
@@ -140,7 +140,7 @@ async function fetchNFTsWithPuppeteer(nft, filters = {}, limit = 10) {
     }
   });
 
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 3000 });
+  await page.goto(url, { waitUntil: 'load', timeout: 2000 });  // Более быстрый таймаут
   const html = await page.content();
   await page.close();
   await browser.close();
@@ -150,10 +150,16 @@ async function fetchNFTsWithPuppeteer(nft, filters = {}, limit = 10) {
 
 async function fetchNFTs(nft, filters = {}, limit = 10) {
   try {
-    return await fetchNFTsWithAxios(nft, filters, limit);
+    const [axiosResult, puppeteerResult] = await Promise.all([
+      fetchNFTsWithAxios(nft, filters, limit),  // Параллельный запрос через Axios
+      fetchNFTsWithPuppeteer(nft, filters, limit),  // Параллельный запрос через Puppeteer
+    ]);
+
+    // Если результат с axios быстрее, возвращаем его
+    return axiosResult.length > 0 ? axiosResult : puppeteerResult;
   } catch (err) {
-    console.warn('Fallback to Puppeteer:', err.message);
-    return await fetchNFTsWithPuppeteer(nft, filters, limit);
+    console.warn('Error in both Axios and Puppeteer:', err.message);
+    return [];  // Если оба метода не сработали
   }
 }
 
