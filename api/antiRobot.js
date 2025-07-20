@@ -48,31 +48,35 @@ async function fetchWithRetry(url, options = {}, retries = 3, delay = 400) {
 
 function parseNFTs(html, limit = 10) {
   const dom = parseDocument(html);
-  const rows = dom.children.filter((el) => el.name === 'tr' || el.attribs?.['data-nft-price']);
+  const rows = findAll(el => el.name === 'tr', [dom]);
+
   const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
   const results = [];
 
   for (const row of rows) {
     if (results.length >= limit) break;
 
-    let price, nftAddress, name, provider;
+    const priceEl = findAll(el => el.attribs?.['data-nft-price'], [row])[0];
+    const addrEl = findAll(el => el.attribs?.['data-nft-address'], [row])[0];
+    const nameEl = findAll(el =>
+      el.name === 'div' && el.attribs?.class?.includes('table-cell-value'), [row])[0];
+    const providerEl = findAll(el =>
+      el.name === 'div' && el.attribs?.class?.includes('table-cell-status-thin'), [row])[0];
 
-    for (const el of row.children || []) {
-      if (el.attribs?.['data-nft-price']) price = parseFloat(el.attribs['data-nft-price']);
-      if (el.attribs?.['data-nft-address']) nftAddress = el.attribs['data-nft-address'];
-      if (el.attribs?.class?.includes('table-cell-value')) name = textContent(el).trim();
-      if (el.attribs?.class?.includes('table-cell-status-thin')) provider = textContent(el).trim();
-    }
+    const price = priceEl ? parseFloat(getAttributeValue(priceEl, 'data-nft-price')) : null;
+    const nftAddress = addrEl ? getAttributeValue(addrEl, 'data-nft-address') : null;
+    const name = nameEl ? textContent(nameEl).trim() : null;
+    const provider = providerEl ? textContent(providerEl).trim() : null;
 
-    if (price && nftAddress && name && allowedProviders.includes(provider)) {
-      results.push({
-        name,
-        slug: slugify(name),
-        price,
-        nftAddress,
-        provider
-      });
-    }
+    if (!price || !nftAddress || !name || !allowedProviders.includes(provider)) continue;
+
+    results.push({
+      name,
+      slug: slugify(name),
+      price,
+      nftAddress,
+      provider
+    });
   }
 
   return results;
