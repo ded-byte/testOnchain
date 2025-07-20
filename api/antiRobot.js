@@ -1,4 +1,4 @@
-import chromium from 'chrome-aws-lambda';
+import chromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
 
 function buildAttrsParams({ backdrop, model, symbol }) {
@@ -31,14 +31,16 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
   const attrsParams = buildAttrsParams(filters);
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
 
-  let browser = null;
+  let browser;
 
   try {
+    const executablePath = await chromium.executablePath;
+
     browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath || process.env.CHROMIUM_PATH,
-      headless: true,
+      executablePath,
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
