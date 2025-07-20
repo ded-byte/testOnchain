@@ -48,9 +48,12 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     headers: {
       'User-Agent': 'Mozilla/5.0',
       'Accept': 'text/html',
-      'Referer': 'https://marketapp.ws/collection/${nft}/'
+      'Referer': 'https://marketapp.ws/collection/${nft}/',
     },
   });
+
+  console.log(html.slice(0, 500));
+
 
   const dom = parseDocument(html);
   const rows = findAll(el => el.name === 'tr', dom.children);
