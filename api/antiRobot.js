@@ -43,9 +43,22 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
       defaultViewport: chromium.defaultViewport,
       executablePath,
       headless: chromium.headless,
+      ignoreHTTPSErrors: true,
+      devtools: false,
+      disableGpu: true,
+      noSandbox: true,
     });
 
     const page = await browser.newPage();
+
+    await page.setRequestInterception(true);
+    page.on('request', (request) => {
+      if (['image', 'stylesheet', 'font'].includes(request.resourceType())) {
+        request.abort();
+      } else {
+        request.continue();
+      }
+    });
 
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     await page.setViewport({ width: 1280, height: 800 });
