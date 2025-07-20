@@ -63,9 +63,20 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     await page.setViewport({ width: 1280, height: 800 });
 
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 2000 });
+    let retries = 3;
+    let pageLoaded = false;
 
-    await page.waitForSelector('table', { timeout: 2000 });
+    while (retries > 0 && !pageLoaded) {
+      try {
+        await page.goto(url, { waitUntil: 'networkidle0', timeout: 5000 });
+        await page.waitForSelector('table', { timeout: 3000 });
+        pageLoaded = true;
+      } catch (err) {
+        console.error('Page load failed, retrying...', err);
+        retries -= 1;
+        if (retries === 0) throw new Error('Page loading failed after 3 retries');
+      }
+    }
 
     const results = await page.evaluate((limit) => {
       const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
