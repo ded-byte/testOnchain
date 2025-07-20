@@ -1,5 +1,8 @@
 import chromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
+import NodeCache from 'node-cache';
+
+const cache = new NodeCache({ stdTTL: 300, checkperiod: 320 });
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
@@ -18,6 +21,14 @@ function buildAttrsParams({ backdrop, model, symbol }) {
 }
 
 async function fetchNFTs(nft, filters = {}, limit = 10) {
+  const cacheKey = `${nft}-${JSON.stringify(filters)}-${limit}`;
+
+  const cachedResult = cache.get(cacheKey);
+  if (cachedResult) {
+    console.log('Returning cached data');
+    return cachedResult;
+  }
+
   const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
   const attrsParams = buildAttrsParams(filters);
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
@@ -32,8 +43,6 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
       defaultViewport: chromium.defaultViewport,
       executablePath,
       headless: chromium.headless,
-      ignoreHTTPSErrors: true,
-      devtools: false,
     });
 
     const page = await browser.newPage();
@@ -96,6 +105,8 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
 
       return nfts;
     }, limit);
+
+    cache.set(cacheKey, results);
 
     return results;
   } catch (err) {
