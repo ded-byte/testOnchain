@@ -1,8 +1,6 @@
 import chromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
-import NodeCache from 'node-cache';
-
-const cache = new NodeCache({ stdTTL: 300, checkperiod: 320 });
+import { Parser } from 'htmlparser2';
 
 let browser;
 
@@ -41,13 +39,6 @@ function buildAttrsParams({ backdrop, model, symbol }) {
 }
 
 async function fetchNFTs(nft, filters = {}, limit = 10) {
-  const cacheKey = `${nft}-${JSON.stringify(filters)}-${limit}`;
-  const cachedResult = cache.get(cacheKey);
-  if (cachedResult) {
-    console.log('Returning cached data');
-    return cachedResult;
-  }
-
   const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
   const attrsParams = buildAttrsParams(filters);
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
@@ -60,7 +51,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
 
     await page.setRequestInterception(true);
     page.on('request', (request) => {
-      if (['image', 'stylesheet', 'font'].includes(request.resourceType())) {
+      if (['image', 'stylesheet', 'font', 'script', 'media'].includes(request.resourceType())) {
         request.abort();
       } else {
         request.continue();
@@ -70,67 +61,79 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     );
-    await page.setViewport({ width: 1280, height: 800 });
 
-    let retries = 2;
-    let pageLoaded = false;
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 1500 });
 
-    while (retries > 0 && !pageLoaded) {
-      try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 3000 });
-        await page.waitForSelector('table', { timeout: 2000 });
-        pageLoaded = true;
-      } catch (err) {
-        console.error('Page load failed, retrying...', err);
-        retries -= 1;
-        if (retries === 0) throw new Error('Page loading failed after retries');
-      }
-    }
+    const html = await page.content();
 
-    const results = await page.evaluate((limit) => {
-      const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
-      const rows = Array.from(document.querySelectorAll('tr'));
-      const nfts = [];
+    const nfts = [];
+    const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
+    let currentRow = null;
+    let currentElement = null;
+    let textBuffer = '';
 
-      for (const row of rows) {
-        if (nfts.length >= limit) break;
+    const parser = new Parser({
+      onopentag(name, attributes) {
+        if (name === 'tr') {
+          currentRow = {};
+        } else if (name === 'td' || name === 'div') {
+          if (attributes['data-nft-price']) {
+            currentRow.price = parseFloat(attributes['data-nft-price']) || null;
+          } else if (attributes['data-nft-address']) {
+            currentRow.nftAddress = attributes['data-nft-address'] || null;
+          } else if (attributes.class && attributes.class.includes('table-cell-value')) {
+            currentElement = 'name';
+          } else if (attributes.class && attributes.class.includes('table-cell-status-thin')) {
+            currentElement = 'provider';
+          }
+        }
+      },
+      ontext(text) {
+        if (currentElement) {
+          textBuffer += text.trim();
+        }
+      },
+      onclosetag(name) {
+        if (name === 'tr' && currentRow) {
+          if (currentRow.name && currentRow.price && currentRow.nftAddress && allowedProviders.includes(currentRow.provider)) {
+            nfts.push({
+              name: currentRow.name,
+              slug: currentRow.name
+                .toLowerCase()
+                .replace(/[^a-z0-9\s#]/g, '')
+                .replace(/\s+/g, '')
+                .replace(/#/g, '-')
+                .replace(/-+/g, '-')
+                .trim(),
+              price: currentRow.price,
+              nftAddress: currentRow.nftAddress,
+              provider: currentRow.provider,
+            });
+          }
+          currentRow = null;
+        } else if (name === 'td' || name === 'div') {
+          if (currentElement === 'name') {
+            currentRow.name = textBuffer || null;
+          } else if (currentElement === 'provider') {
+            currentRow.provider = textBuffer || null;
+          }
+          currentElement = null;
+          textBuffer = '';
+        }
+        if (nfts.length >= limit) {
+          parser.end();
+        }
+      },
+    }, { decodeEntities: true });
 
-        const priceEl = row.querySelector('[data-nft-price]');
-        const addrEl = row.querySelector('[data-nft-address]');
-        const nameEl = row.querySelector('.table-cell-value');
-        const providerEl = row.querySelector('.table-cell-status-thin');
-
-        const price = priceEl ? parseFloat(priceEl.getAttribute('data-nft-price')) : null;
-        const nftAddress = addrEl ? addrEl.getAttribute('data-nft-address') : null;
-        const name = nameEl ? nameEl.textContent.trim() : null;
-        const provider = providerEl ? providerEl.textContent.trim() : null;
-
-        if (!price || !nftAddress || !name || !allowedProviders.includes(provider)) continue;
-
-        nfts.push({
-          name,
-          slug: name
-            .toLowerCase()
-            .replace(/[^a-z0-9\s#]/g, '')
-            .replace(/\s+/g, '')
-            .replace(/#/g, '-')
-            .replace(/-+/g, '-')
-            .trim(),
-          price,
-          nftAddress,
-          provider,
-        });
-      }
-
-      return nfts;
-    }, limit);
+    parser.write(html);
+    parser.end();
 
     console.log('Fetch time:', Date.now() - startTime, 'ms');
 
-    cache.set(cacheKey, results);
+    await page.close();
 
-
-    return results;
+    return nfts;
   } catch (err) {
     console.error('Error fetching NFTs:', err);
     throw new Error('Failed to fetch NFTs from marketapp.ws');
