@@ -37,12 +37,14 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath,
-      headless: chromium.headless,
+      executablePath: await chromium.executablePath || process.env.CHROMIUM_PATH,
+      headless: true,
     });
 
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 20000 });
+
+    await page.waitForSelector('tr', { timeout: 5000 });
 
     const results = await page.evaluate((limit) => {
       const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
