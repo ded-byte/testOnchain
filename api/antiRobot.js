@@ -63,7 +63,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     await page.setViewport({ width: 1280, height: 800 });
 
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 3000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 2000 });
 
     await page.waitForSelector('table', { timeout: 2000 });
 
