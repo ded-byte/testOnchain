@@ -34,10 +34,10 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
 
   let browser;
+  const startTime = Date.now();
 
   try {
     const executablePath = await chromium.executablePath();
-
     browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
@@ -50,13 +50,9 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     await page.setViewport({ width: 1280, height: 800 });
 
-    await page.goto(url, { waitUntil: 'load', timeout: 5000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 3000 });
 
-    await page.waitForSelector('table', { timeout: 3000 });
-
-    await page.evaluate(() => {
-      window.scrollBy(0, 600);
-    });
+    await page.waitForSelector('table', { timeout: 2000 });
 
     const results = await page.evaluate((limit) => {
       const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
@@ -94,6 +90,8 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
 
       return nfts;
     }, limit);
+
+    console.log('Fetch time:', Date.now() - startTime, 'ms');
 
     cache.set(cacheKey, results);
 
