@@ -34,7 +34,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
   let browser;
 
   try {
-    const executablePath = chromium.executablePath;
+    const executablePath = await chromium.executablePath(); // <-- fixed here
 
     browser = await puppeteer.launch({
       args: chromium.args,
