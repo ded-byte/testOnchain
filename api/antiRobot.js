@@ -50,24 +50,13 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     await page.setViewport({ width: 1280, height: 800 });
 
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      if (req.resourceType() === 'image' || req.resourceType() === 'stylesheet' || req.resourceType() === 'font') {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
+    await page.goto(url, { waitUntil: 'load', timeout: 5000 });
 
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 5000 });
+    await page.waitForSelector('table', { timeout: 3000 });
 
-    await page.waitForTimeout(300);
     await page.evaluate(() => {
       window.scrollBy(0, 600);
     });
-    await page.waitForTimeout(500);
-
-    await page.waitForSelector('tr', { timeout: 5000 });
 
     const results = await page.evaluate((limit) => {
       const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
