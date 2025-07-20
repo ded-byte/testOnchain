@@ -2,7 +2,7 @@ import chromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
 import axios from 'axios';
 import { parseDocument } from 'htmlparser2';
-import { getAttributeValue, textContent } from 'domutils';
+import { findAll, getAttributeValue, textContent } from 'domutils';
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
