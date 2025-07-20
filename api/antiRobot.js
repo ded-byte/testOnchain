@@ -17,15 +17,6 @@ function buildAttrsParams({ backdrop, model, symbol }) {
   return params.join('&');
 }
 
-function slugify(name) {
-  return name.toLowerCase()
-    .replace(/[^a-z0-9\s#]/g, '')
-    .replace(/\s+/g, '')
-    .replace(/#/g, '-')
-    .replace(/-+/g, '-')
-    .trim();
-}
-
 async function fetchNFTs(nft, filters = {}, limit = 10) {
   const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
   const attrsParams = buildAttrsParams(filters);
@@ -41,6 +32,8 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
       defaultViewport: chromium.defaultViewport,
       executablePath,
       headless: chromium.headless,
+      ignoreHTTPSErrors: true,
+      devtools: false,
     });
 
     const page = await browser.newPage();
@@ -48,17 +41,24 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     await page.setViewport({ width: 1280, height: 800 });
 
-    // Увеличиваем таймаут для загрузки страницы
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 10000 }); // увеличиваем до 10 секунд
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      if (req.resourceType() === 'image' || req.resourceType() === 'stylesheet' || req.resourceType() === 'font') {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
 
-    await page.waitForTimeout(600);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 5000 });
+
+    await page.waitForTimeout(300);
     await page.evaluate(() => {
       window.scrollBy(0, 600);
     });
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(500);
 
-    // Увеличиваем таймаут ожидания для поиска элемента
-    await page.waitForSelector('tr', { timeout: 10000 }); // увеличиваем до 10 секунд
+    await page.waitForSelector('tr', { timeout: 5000 });
 
     const results = await page.evaluate((limit) => {
       const allowedProviders = ['Marketapp', 'Getgems', 'Fragment'];
