@@ -5,7 +5,7 @@ import { parseDocument } from 'htmlparser2';
 import { findAll, getAttributeValue, textContent } from 'domutils';
 import NodeCache from 'node-cache';
 
-const cache = new NodeCache({ stdTTL: 10, checkperiod: 12 });  // Кэш на 10 секунд
+const cache = new NodeCache({ stdTTL: 10, checkperiod: 12 });
 
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
@@ -140,7 +140,7 @@ async function fetchNFTsWithPuppeteer(nft, filters = {}, limit = 10) {
     }
   });
 
-  await page.goto(url, { waitUntil: 'load', timeout: 2000 });  // Более быстрый таймаут
+  await page.goto(url, { waitUntil: 'load', timeout: 2000 });
   const html = await page.content();
   await page.close();
   await browser.close();
@@ -150,16 +150,20 @@ async function fetchNFTsWithPuppeteer(nft, filters = {}, limit = 10) {
 
 async function fetchNFTs(nft, filters = {}, limit = 10) {
   try {
-    const [axiosResult, puppeteerResult] = await Promise.all([
-      fetchNFTsWithAxios(nft, filters, limit),  // Параллельный запрос через Axios
-      fetchNFTsWithPuppeteer(nft, filters, limit),  // Параллельный запрос через Puppeteer
+    const axiosRequest = fetchNFTsWithAxios(nft, filters, limit);
+    const puppeteerRequest = fetchNFTsWithPuppeteer(nft, filters, limit);
+
+    const results = await Promise.race([
+      axiosRequest,
+      new Promise((resolve, reject) => setTimeout(() => reject('Axios request timeout'), 1000)),
+      puppeteerRequest,
+      new Promise((resolve, reject) => setTimeout(() => reject('Puppeteer request timeout'), 2000)),
     ]);
 
-    // Если результат с axios быстрее, возвращаем его
-    return axiosResult.length > 0 ? axiosResult : puppeteerResult;
+    return results;
   } catch (err) {
-    console.warn('Error in both Axios and Puppeteer:', err.message);
-    return [];  // Если оба метода не сработали
+    console.warn('Error fetching NFTs:', err.message);
+    return [];
   }
 }
 
