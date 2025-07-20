@@ -4,9 +4,29 @@ import NodeCache from 'node-cache';
 
 const cache = new NodeCache({ stdTTL: 300, checkperiod: 320 });
 
+let browser;
+
+async function initBrowser() {
+  if (!browser || !(await browser.isConnected())) {
+    const executablePath = await chromium.executablePath();
+    browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath,
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
+      devtools: false,
+      disableGpu: true,
+      noSandbox: true,
+    });
+    console.log('Browser initialized');
+  }
+  return browser;
+}
+
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
-  const normalize = (v) => typeof v === 'string' ? v.trim().toLowerCase() : '';
+  const normalize = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : '');
 
   const params = [];
   const normBackdrop = normalize(backdrop);
@@ -22,7 +42,6 @@ function buildAttrsParams({ backdrop, model, symbol }) {
 
 async function fetchNFTs(nft, filters = {}, limit = 10) {
   const cacheKey = `${nft}-${JSON.stringify(filters)}-${limit}`;
-
   const cachedResult = cache.get(cacheKey);
   if (cachedResult) {
     console.log('Returning cached data');
@@ -33,23 +52,11 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
   const attrsParams = buildAttrsParams(filters);
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
 
-  let browser;
   const startTime = Date.now();
 
   try {
-    const executablePath = await chromium.executablePath();
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath,
-      headless: chromium.headless,
-      ignoreHTTPSErrors: true,
-      devtools: false,
-      disableGpu: true,
-      noSandbox: true,
-    });
-
-    const page = await browser.newPage();
+    const browserInstance = await initBrowser();
+    const page = await browserInstance.newPage();
 
     await page.setRequestInterception(true);
     page.on('request', (request) => {
@@ -60,21 +67,23 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
       }
     });
 
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    );
     await page.setViewport({ width: 1280, height: 800 });
 
-    let retries = 3;
+    let retries = 2;
     let pageLoaded = false;
 
     while (retries > 0 && !pageLoaded) {
       try {
-        await page.goto(url, { waitUntil: 'networkidle0', timeout: 5000 });
-        await page.waitForSelector('table', { timeout: 3000 });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 3000 });
+        await page.waitForSelector('table', { timeout: 2000 });
         pageLoaded = true;
       } catch (err) {
         console.error('Page load failed, retrying...', err);
         retries -= 1;
-        if (retries === 0) throw new Error('Page loading failed after 3 retries');
+        if (retries === 0) throw new Error('Page loading failed after retries');
       }
     }
 
@@ -100,7 +109,8 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
 
         nfts.push({
           name,
-          slug: name.toLowerCase()
+          slug: name
+            .toLowerCase()
             .replace(/[^a-z0-9\s#]/g, '')
             .replace(/\s+/g, '')
             .replace(/#/g, '-')
@@ -108,7 +118,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
             .trim(),
           price,
           nftAddress,
-          provider
+          provider,
         });
       }
 
@@ -119,14 +129,11 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
 
     cache.set(cacheKey, results);
 
+
     return results;
   } catch (err) {
-    console.error('Browser error:', err);
+    console.error('Error fetching NFTs:', err);
     throw new Error('Failed to fetch NFTs from marketapp.ws');
-  } finally {
-    if (browser) {
-      await browser.close();
-    }
   }
 }
 
