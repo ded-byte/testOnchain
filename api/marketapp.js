@@ -27,12 +27,25 @@ function slugify(name) {
     .trim();
 }
 
+// 🔁 Обёртка с таймаутом и повторами
+async function fetchWithRetry(url, options = {}, retries = 3, delay = 1000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await axios.get(url, { timeout: 3000, ...options });
+      return response;
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
 async function fetchNFTs(nft, filters = {}, limit = 10) {
   const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
   const attrsParams = buildAttrsParams(filters);
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
 
-  const { data: html } = await axios.get(url, {
+  const { data: html } = await fetchWithRetry(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0',
       'Accept': 'text/html',
