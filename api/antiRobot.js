@@ -15,7 +15,10 @@ async function getBrowser() {
     console.log('Launching browser...');
     try {
       browser = await puppeteer.launch({
-        args: chromium.args,
+        args: [
+          ...chromium.args,
+          '--no-sandbox',
+        ],
         defaultViewport: chromium.defaultViewport,
         executablePath: await chromium.executablePath(),
         headless: chromium.headless,
@@ -173,7 +176,12 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     const axiosRequest = fetchNFTsWithAxios(nft, filters, limit);
     const puppeteerRequest = fetchNFTsWithPuppeteer(nft, filters, limit);
 
-    const results = await Promise.race([axiosRequest, puppeteerRequest]);
+    const results = await Promise.race([
+      axiosRequest,
+      new Promise((resolve, reject) => setTimeout(() => reject('Axios request timeout'), 1500)),
+      puppeteerRequest,
+      new Promise((resolve, reject) => setTimeout(() => reject('Puppeteer request timeout'), 2000)),
+    ]);
 
     return results;
   } catch (err) {
