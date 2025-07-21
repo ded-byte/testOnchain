@@ -15,7 +15,7 @@ export default async function handler(req, res) {
   }
 
   const normalize = (str) => str?.trim();
-  const isValidAttr = (attr) => attr && attr.value && attr.value !== 'All';
+  const isValidAttr = (attr) => attr?.value && attr.value !== 'All';
 
   const queryParams = new URLSearchParams();
   queryParams.append('provider_name', 'tonnel');
