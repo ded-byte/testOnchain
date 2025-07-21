@@ -6,7 +6,11 @@ import { findAll, getAttributeValue, textContent } from 'domutils';
 import NodeCache from 'node-cache';
 
 const cache = new NodeCache({ stdTTL: 10 });
+
 let browser;
+
+// Уменьшение времени при запросах
+const MAX_TIMEOUT = 1000;  // 1 секунда
 
 const slugify = (name) => name.toLowerCase()
   .replace(/[^a-z0-9\s#]/g, '')
@@ -18,16 +22,14 @@ const slugify = (name) => name.toLowerCase()
 const buildAttrsParams = ({ backdrop, model, symbol }) => {
   const encode = (str) => str.replace(/\s+/g, '+');
   const normalize = (v) => typeof v === 'string' ? v.trim().toLowerCase() : '';
-
   const p = [];
   if ((backdrop = normalize(backdrop)) && backdrop !== 'all') p.push(`attrs=Backdrop___${encode(backdrop)}`);
   if ((model = normalize(model)) && model !== 'all') p.push(`attrs=Model___${encode(model)}`);
   if ((symbol = normalize(symbol)) && symbol !== 'all') p.push(`attrs=Symbol___${encode(symbol)}`);
-
   return p.join('&');
 };
 
-const getBrowser = async () => {
+async function getBrowser() {
   if (browser) return browser;
   const execPath = await chromium.executablePath();
   browser = await puppeteer.launch({
@@ -38,18 +40,18 @@ const getBrowser = async () => {
     ignoreHTTPSErrors: true,
   });
   return browser;
-};
+}
 
-const fetchWithAxios = async (nft, filters, limit) => {
+async function fetchWithAxios(nft, filters, limit) {
   const cacheKey = `${nft}_${JSON.stringify(filters)}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
-  const url = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
-  const fullUrl = url + (buildAttrsParams(filters) ? `&${buildAttrsParams(filters)}` : '');
+  const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
+  const fullUrl = baseUrl + (buildAttrsParams(filters) ? `&${buildAttrsParams(filters)}` : '');
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 1000);
+  const timeout = setTimeout(() => controller.abort(), MAX_TIMEOUT);
 
   try {
     const res = await axios.get(fullUrl, {
@@ -59,20 +61,22 @@ const fetchWithAxios = async (nft, filters, limit) => {
         'Referer': `https://marketapp.ws/collection/${nft}/`,
       },
     });
+
     const html = res.data;
+
     if (html.length < 1000 || html.includes('Just a moment') || html.includes('<meta name="robots"')) throw new Error('Bot protection');
+
     const parsed = parseNFTs(html, limit);
     cache.set(cacheKey, parsed);
     return parsed;
   } finally {
     clearTimeout(timeout);
   }
-};
+}
 
-const fetchWithPuppeteer = async (nft, filters, limit) => {
+async function fetchWithPuppeteer(nft, filters, limit) {
   const browser = await getBrowser();
   const page = await browser.newPage();
-
   try {
     await page.setRequestInterception(true);
     page.on('request', req => {
@@ -81,18 +85,19 @@ const fetchWithPuppeteer = async (nft, filters, limit) => {
     });
 
     const url = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale${buildAttrsParams(filters) ? `&${buildAttrsParams(filters)}` : ''}`;
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 2500 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: MAX_TIMEOUT });
 
     const html = await page.content();
     return parseNFTs(html, limit);
   } finally {
     await page.close();
   }
-};
+}
 
-const parseNFTs = (html, limit = 10) => {
+function parseNFTs(html, limit = 10) {
   const dom = parseDocument(html);
   const rows = findAll(el => el.name === 'tr', [dom]);
+
   const allowed = ['Marketapp', 'Getgems', 'Fragment'];
   const result = [];
 
@@ -115,11 +120,11 @@ const parseNFTs = (html, limit = 10) => {
   }
 
   return result;
-};
+}
 
-const fetchNFTs = async (nft, filters = {}, limit = 10) => {
+async function fetchNFTs(nft, filters = {}, limit = 10) {
   try {
-    return await Promise.any([
+    return await Promise.race([
       fetchWithAxios(nft, filters, limit),
       fetchWithPuppeteer(nft, filters, limit),
     ]);
@@ -127,7 +132,7 @@ const fetchNFTs = async (nft, filters = {}, limit = 10) => {
     console.warn('All fetch methods failed:', err);
     return [];
   }
-};
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Only POST allowed' });
