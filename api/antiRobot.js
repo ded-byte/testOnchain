@@ -173,12 +173,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
     const axiosRequest = fetchNFTsWithAxios(nft, filters, limit);
     const puppeteerRequest = fetchNFTsWithPuppeteer(nft, filters, limit);
 
-    const results = await Promise.race([
-      axiosRequest,
-      new Promise((resolve, reject) => setTimeout(() => reject('Axios request timeout'), 1500)),
-      puppeteerRequest,
-      new Promise((resolve, reject) => setTimeout(() => reject('Puppeteer request timeout'), 2000)),
-    ]);
+    const results = await Promise.race([axiosRequest, puppeteerRequest]);
 
     return results;
   } catch (err) {
