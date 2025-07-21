@@ -9,8 +9,7 @@ const cache = new NodeCache({ stdTTL: 10 });
 
 let browser;
 
-// Уменьшение времени при запросах
-const MAX_TIMEOUT = 1000;  // 1 секунда
+const MAX_TIMEOUT = 800;
 
 const slugify = (name) => name.toLowerCase()
   .replace(/[^a-z0-9\s#]/g, '')
