@@ -12,6 +12,7 @@ let page = null;
 
 async function getBrowser() {
   if (!browser) {
+    console.log('Launching browser...');
     browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
@@ -19,12 +20,14 @@ async function getBrowser() {
       headless: chromium.headless,
       ignoreHTTPSErrors: true,
     });
+    console.log('Browser launched');
   }
   return browser;
 }
 
 async function getPage() {
   if (!page) {
+    console.log('Opening new page...');
     const browser = await getBrowser();
     page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
@@ -36,8 +39,25 @@ async function getPage() {
         req.continue();
       }
     });
+    console.log('Page opened');
   }
   return page;
+}
+
+async function closeBrowser() {
+  if (browser) {
+    console.log('Closing browser...');
+    await browser.close();
+    browser = null;
+  }
+}
+
+async function closePage() {
+  if (page) {
+    console.log('Closing page...');
+    await page.close();
+    page = null;
+  }
 }
 
 function buildAttrsParams({ backdrop, model, symbol }) {
@@ -156,10 +176,12 @@ async function fetchNFTsWithPuppeteer(nft, filters = {}, limit = 10) {
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
 
   try {
+    console.log('Navigating to URL:', url);
     await page.goto(url, { waitUntil: 'load', timeout: 2000 });
     const html = await page.content();
     return parseNFTs(html, limit);
   } catch (err) {
+    console.error('Puppeteer request failed:', err.message);
     throw new Error('Puppeteer request failed: ' + err.message);
   }
 }
