@@ -58,10 +58,10 @@ async function fetchWithRetry(url, options = {}, retries = 3, delay = 400) {
   for (let i = 0; i < retries; i++) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 1000);
+      const timeout = setTimeout(() => controller.abort(), 1500);
       const response = await axios.get(url, {
         signal: controller.signal,
-        timeout: 1000,
+        timeout: 1500,
         ...options,
       });
 
@@ -160,7 +160,7 @@ async function fetchNFTsWithPuppeteer(nft, filters = {}, limit = 10) {
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
 
   try {
-    await page.goto(url, { waitUntil: 'load', timeout: 1000 });
+    await page.goto(url, { waitUntil: 'load', timeout: 1500 });
     const html = await page.content();
     return parseNFTs(html, limit);
   } catch (err) {
@@ -175,7 +175,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
 
     const results = await Promise.race([
       axiosRequest,
-      new Promise((resolve, reject) => setTimeout(() => reject('Axios request timeout'), 1000)),
+      new Promise((resolve, reject) => setTimeout(() => reject('Axios request timeout'), 1500)),
       puppeteerRequest,
       new Promise((resolve, reject) => setTimeout(() => reject('Puppeteer request timeout'), 2000)),
     ]);
