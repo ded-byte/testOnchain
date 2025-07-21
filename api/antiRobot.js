@@ -19,6 +19,22 @@ function slugify(name) {
     .trim();
 }
 
+function buildAttrsParams({ backdrop, model, symbol }) {
+  const encode = (str) => str.replace(/\s+/g, '+');
+  const normalize = (v) => typeof v === 'string' ? v.trim().toLowerCase() : '';
+
+  const params = [];
+  const normBackdrop = normalize(backdrop);
+  const normModel = normalize(model);
+  const normSymbol = normalize(symbol);
+
+  if (normBackdrop && normBackdrop !== 'all') params.push(`attrs=Backdrop___${encode(backdrop)}`);
+  if (normModel && normModel !== 'all') params.push(`attrs=Model___${encode(model)}`);
+  if (normSymbol && normSymbol !== 'all') params.push(`attrs=Symbol___${encode(symbol)}`);
+
+  return params.join('&');
+}
+
 async function getBrowser() {
   if (!browser) {
     console.log('Launching browser...');
