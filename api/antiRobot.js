@@ -10,6 +10,15 @@ const cache = new NodeCache({ stdTTL: 10, checkperiod: 12 });
 let browser = null;
 let page = null;
 
+function slugify(name) {
+  return name.toLowerCase()
+    .replace(/[^a-z0-9\s#]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/#/g, '-')
+    .replace(/-+/g, '-')
+    .trim();
+}
+
 async function getBrowser() {
   if (!browser) {
     console.log('Launching browser...');
