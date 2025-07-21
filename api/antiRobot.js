@@ -5,7 +5,7 @@ import { parseDocument } from 'htmlparser2';
 import { findAll, getAttributeValue, textContent } from 'domutils';
 import NodeCache from 'node-cache';
 
-const cache = new NodeCache({ stdTTL: 10, checkperiod: 12 });
+const cache = new NodeCache({ stdTTL: 30, checkperiod: 60 });
 
 let browser = null;
 let page = null;
@@ -27,10 +27,12 @@ async function getBrowser() {
         args: [
           ...chromium.args,
           '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-gpu',
         ],
         defaultViewport: chromium.defaultViewport,
         executablePath: await chromium.executablePath(),
-        headless: chromium.headless,
+        headless: true,
         ignoreHTTPSErrors: true,
       });
       console.log('Browser launched');
@@ -120,18 +122,6 @@ function parseNFTs(html, limit = 10) {
   }
 
   return results;
-}
-
-function buildAttrsParams({ backdrop, model, symbol }) {
-  const encode = (str) => str.replace(/\s+/g, '+');
-  const normalize = (v) => typeof v === 'string' ? v.trim().toLowerCase() : '';
-
-  const params = [];
-  if (normalize(backdrop) !== 'all') params.push(`attrs=Backdrop___${encode(backdrop)}`);
-  if (normalize(model) !== 'all') params.push(`attrs=Model___${encode(model)}`);
-  if (normalize(symbol) !== 'all') params.push(`attrs=Symbol___${encode(symbol)}`);
-
-  return params.join('&');
 }
 
 async function fetchNFTsWithAxios(nft, filters = {}, limit = 10) {
