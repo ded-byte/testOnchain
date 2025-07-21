@@ -13,14 +13,19 @@ let page = null;
 async function getBrowser() {
   if (!browser) {
     console.log('Launching browser...');
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-      ignoreHTTPSErrors: true,
-    });
-    console.log('Browser launched');
+    try {
+      browser = await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+        ignoreHTTPSErrors: true,
+      });
+      console.log('Browser launched');
+    } catch (error) {
+      console.error('Error launching browser:', error.message);
+      throw error;
+    }
   }
   return browser;
 }
@@ -28,68 +33,35 @@ async function getBrowser() {
 async function getPage() {
   if (!page) {
     console.log('Opening new page...');
-    const browser = await getBrowser();
-    page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
-    await page.setRequestInterception(true);
-    page.on('request', req => {
-      if (['image', 'stylesheet', 'font', 'script', 'media'].includes(req.resourceType())) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-    console.log('Page opened');
+    try {
+      const browser = await getBrowser();
+      page = await browser.newPage();
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
+      await page.setRequestInterception(true);
+      page.on('request', req => {
+        if (['image', 'stylesheet', 'font', 'script', 'media'].includes(req.resourceType())) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
+      console.log('Page opened');
+    } catch (error) {
+      console.error('Error opening page:', error.message);
+      throw error;
+    }
   }
   return page;
-}
-
-async function closeBrowser() {
-  if (browser) {
-    console.log('Closing browser...');
-    await browser.close();
-    browser = null;
-  }
-}
-
-async function closePage() {
-  if (page) {
-    console.log('Closing page...');
-    await page.close();
-    page = null;
-  }
-}
-
-function buildAttrsParams({ backdrop, model, symbol }) {
-  const encode = (str) => str.replace(/\s+/g, '+');
-  const normalize = (v) => typeof v === 'string' ? v.trim().toLowerCase() : '';
-
-  const params = [];
-  if (normalize(backdrop) !== 'all') params.push(`attrs=Backdrop___${encode(backdrop)}`);
-  if (normalize(model) !== 'all') params.push(`attrs=Model___${encode(model)}`);
-  if (normalize(symbol) !== 'all') params.push(`attrs=Symbol___${encode(symbol)}`);
-
-  return params.join('&');
-}
-
-function slugify(name) {
-  return name.toLowerCase()
-    .replace(/[^a-z0-9\s#]/g, '')
-    .replace(/\s+/g, '')
-    .replace(/#/g, '-')
-    .replace(/-+/g, '-')
-    .trim();
 }
 
 async function fetchWithRetry(url, options = {}, retries = 3, delay = 400) {
   for (let i = 0; i < retries; i++) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 1500);
-
+      const timeout = setTimeout(() => controller.abort(), 1000);
       const response = await axios.get(url, {
         signal: controller.signal,
-        timeout: 1500,
+        timeout: 1000,
         ...options,
       });
 
@@ -138,6 +110,18 @@ function parseNFTs(html, limit = 10) {
   return results;
 }
 
+function buildAttrsParams({ backdrop, model, symbol }) {
+  const encode = (str) => str.replace(/\s+/g, '+');
+  const normalize = (v) => typeof v === 'string' ? v.trim().toLowerCase() : '';
+
+  const params = [];
+  if (normalize(backdrop) !== 'all') params.push(`attrs=Backdrop___${encode(backdrop)}`);
+  if (normalize(model) !== 'all') params.push(`attrs=Model___${encode(model)}`);
+  if (normalize(symbol) !== 'all') params.push(`attrs=Symbol___${encode(symbol)}`);
+
+  return params.join('&');
+}
+
 async function fetchNFTsWithAxios(nft, filters = {}, limit = 10) {
   const cacheKey = `${nft}_${JSON.stringify(filters)}`;
   const cachedData = cache.get(cacheKey);
@@ -176,12 +160,10 @@ async function fetchNFTsWithPuppeteer(nft, filters = {}, limit = 10) {
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
 
   try {
-    console.log('Navigating to URL:', url);
-    await page.goto(url, { waitUntil: 'load', timeout: 2000 });
+    await page.goto(url, { waitUntil: 'load', timeout: 1000 });
     const html = await page.content();
     return parseNFTs(html, limit);
   } catch (err) {
-    console.error('Puppeteer request failed:', err.message);
     throw new Error('Puppeteer request failed: ' + err.message);
   }
 }
