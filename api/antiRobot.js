@@ -7,6 +7,39 @@ import NodeCache from 'node-cache';
 
 const cache = new NodeCache({ stdTTL: 10, checkperiod: 12 });
 
+let browser = null;
+let page = null;
+
+async function getBrowser() {
+  if (!browser) {
+    browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
+    });
+  }
+  return browser;
+}
+
+async function getPage() {
+  if (!page) {
+    const browser = await getBrowser();
+    page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
+    await page.setRequestInterception(true);
+    page.on('request', req => {
+      if (['image', 'stylesheet', 'font', 'script', 'media'].includes(req.resourceType())) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+  }
+  return page;
+}
+
 function buildAttrsParams({ backdrop, model, symbol }) {
   const encode = (str) => str.replace(/\s+/g, '+');
   const normalize = (v) => typeof v === 'string' ? v.trim().toLowerCase() : '';
@@ -117,35 +150,18 @@ async function fetchNFTsWithAxios(nft, filters = {}, limit = 10) {
 }
 
 async function fetchNFTsWithPuppeteer(nft, filters = {}, limit = 10) {
-  const browser = await puppeteer.launch({
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
-    ignoreHTTPSErrors: true,
-  });
-
+  const page = await getPage();
   const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
   const attrsParams = buildAttrsParams(filters);
   const url = `${baseUrl}${attrsParams ? `&${attrsParams}` : ''}`;
 
-  const page = await browser.newPage();
-  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
-  await page.setRequestInterception(true);
-  page.on('request', req => {
-    if (['image', 'stylesheet', 'font', 'script', 'media'].includes(req.resourceType())) {
-      req.abort();
-    } else {
-      req.continue();
-    }
-  });
-
-  await page.goto(url, { waitUntil: 'load', timeout: 2000 });
-  const html = await page.content();
-  await page.close();
-  await browser.close();
-
-  return parseNFTs(html, limit);
+  try {
+    await page.goto(url, { waitUntil: 'load', timeout: 2000 });
+    const html = await page.content();
+    return parseNFTs(html, limit);
+  } catch (err) {
+    throw new Error('Puppeteer request failed: ' + err.message);
+  }
 }
 
 async function fetchNFTs(nft, filters = {}, limit = 10) {
