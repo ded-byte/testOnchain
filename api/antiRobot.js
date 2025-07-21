@@ -111,13 +111,27 @@ function parseNFTs(html, limit = 10) {
   for (const row of rows) {
     if (result.length >= limit) break;
 
-    const price = parseFloat(getAttributeValue(findAll(el => el.attribs?.['data-nft-price'], [row])[0], 'data-nft-price'));
-    const addr = getAttributeValue(findAll(el => el.attribs?.['data-nft-address'], [row])[0], 'data-nft-address');
-    const name = textContent(findAll(el => el.name === 'div' && el.attribs?.class?.includes('table-cell-value'), [row])[0] || {}).trim();
-    const provider = textContent(findAll(el => el.name === 'div' && el.attribs?.class?.includes('table-cell-status-thin'), [row])[0] || {}).trim();
+    const priceEl = findAll(el => el.attribs?.['data-nft-price'], [row])[0];
+    const addrEl = findAll(el => el.attribs?.['data-nft-address'], [row])[0];
+    const nameEl = findAll(el =>
+      el.name === 'div' && el.attribs?.class?.includes('table-cell-value'), [row])[0];
+    const providerEl = findAll(el =>
+      el.name === 'div' && el.attribs?.class?.includes('table-cell-status-thin'), [row])[0];
 
-    if (!price || !addr || !name || !allowed.includes(provider)) continue;
-    result.push({ name, slug: slugify(name), price, nftAddress: addr, provider });
+    const price = priceEl ? parseFloat(getAttributeValue(priceEl, 'data-nft-price')) : null;
+    const nftAddress = addrEl ? getAttributeValue(addrEl, 'data-nft-address') : null;
+    const name = nameEl ? textContent(nameEl).trim() : null;
+    const provider = providerEl ? textContent(providerEl).trim() : null;
+
+    if (!price || !nftAddress || !name || !allowed.includes(provider)) continue;
+
+    result.push({
+      name,
+      slug: slugify(name),
+      price,
+      nftAddress,
+      provider
+    });
   }
 
   return result;
