@@ -1,13 +1,9 @@
-import chromium from '@sparticuz/chromium';
-import puppeteer from 'puppeteer-core';
 import axios from 'axios';
 import { parseDocument } from 'htmlparser2';
 import { findAll, getAttributeValue, textContent } from 'domutils';
 import NodeCache from 'node-cache';
 
 const cache = new NodeCache({ stdTTL: 10 });
-
-let browser, page;
 
 function slugify(name) {
   return name.toLowerCase()
@@ -30,31 +26,6 @@ function buildAttrsParams({ backdrop, model, symbol }) {
   return p.join('&');
 }
 
-async function initBrowser() {
-  if (browser && page) return;
-  const execPath = await chromium.executablePath();
-
-  browser = await puppeteer.launch({
-    args: chromium.args,
-    executablePath: execPath,
-    headless: chromium.headless,
-    ignoreHTTPSErrors: true,
-  });
-
-  page = await browser.newPage();
-
-  // блокируем всё лишнее
-  await page.setRequestInterception(true);
-  page.on('request', req => {
-    const block = ['stylesheet', 'font', 'image', 'media'];
-    if (block.includes(req.resourceType())) req.abort();
-    else req.continue();
-  });
-
-  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
-  await page.setCacheEnabled(false);
-}
-
 async function fetchFast(nft, filters, limit = 10) {
   const cacheKey = `${nft}_${JSON.stringify(filters)}`;
   const cached = cache.get(cacheKey);
@@ -63,18 +34,19 @@ async function fetchFast(nft, filters, limit = 10) {
   const base = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
   const url = buildAttrsParams(filters) ? `${base}&${buildAttrsParams(filters)}` : base;
 
-  await initBrowser();
-
   try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 2000 });
-    await page.waitForSelector('tr', { timeout: 700 }); // только таблицу, не весь DOM
+    const { data: html } = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+      },
+      timeout: 1500,
+    });
 
-    const html = await page.content();
     const parsed = parseNFTs(html, limit);
     cache.set(cacheKey, parsed);
     return parsed;
   } catch (err) {
-    console.warn('Puppeteer failed:', err.message);
+    console.warn('Axios fetch failed:', err.message);
     return [];
   }
 }
