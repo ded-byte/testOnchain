@@ -7,7 +7,7 @@ import NodeCache from 'node-cache';
 
 const cache = new NodeCache({ stdTTL: 10 });
 
-let browser;
+let browser, page;
 
 function slugify(name) {
   return name.toLowerCase()
@@ -30,74 +30,52 @@ function buildAttrsParams({ backdrop, model, symbol }) {
   return p.join('&');
 }
 
-async function getBrowser() {
-  if (browser) return browser;
+async function initBrowser() {
+  if (browser && page) return;
   const execPath = await chromium.executablePath();
-  console.log('Launching Puppeteer with path:', execPath);
 
   browser = await puppeteer.launch({
     args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
     executablePath: execPath,
     headless: chromium.headless,
     ignoreHTTPSErrors: true,
   });
 
-  return browser;
+  page = await browser.newPage();
+
+  // блокируем всё лишнее
+  await page.setRequestInterception(true);
+  page.on('request', req => {
+    const block = ['stylesheet', 'font', 'image', 'media'];
+    if (block.includes(req.resourceType())) req.abort();
+    else req.continue();
+  });
+
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
+  await page.setCacheEnabled(false);
 }
 
-async function fetchWithAxios(nft, filters, limit) {
+async function fetchFast(nft, filters, limit = 10) {
   const cacheKey = `${nft}_${JSON.stringify(filters)}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
-  const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
-  const fullUrl = baseUrl + (buildAttrsParams(filters) ? `&${buildAttrsParams(filters)}` : '');
+  const base = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
+  const url = buildAttrsParams(filters) ? `${base}&${buildAttrsParams(filters)}` : base;
 
-  const res = await axios.get(fullUrl, {
-    timeout: 1000,
-    headers: {
-      'User-Agent': 'Mozilla/5.0',
-      'Referer': `https://marketapp.ws/collection/${nft}/`,
-    },
-  });
-
-  const html = res.data;
-
-  if (
-    html.length < 1000 ||
-    html.includes('Just a moment') ||
-    html.includes('<meta name="robots" content="noindex"')
-  ) {
-    throw new Error('Bot protection triggered');
-  }
-
-  const parsed = parseNFTs(html, limit);
-  cache.set(cacheKey, parsed);
-  return parsed;
-}
-
-async function fetchWithPuppeteer(nft, filters, limit) {
-  const browser = await getBrowser();
-  const page = await browser.newPage();
+  await initBrowser();
 
   try {
-    await page.setRequestInterception(true);
-    page.on('request', req => {
-      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-
-    const url = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale${buildAttrsParams(filters) ? `&${buildAttrsParams(filters)}` : ''}`;
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 2500 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 2000 });
+    await page.waitForSelector('tr', { timeout: 700 }); // только таблицу, не весь DOM
 
     const html = await page.content();
-    return parseNFTs(html, limit);
-  } finally {
-    await page.close();
+    const parsed = parseNFTs(html, limit);
+    cache.set(cacheKey, parsed);
+    return parsed;
+  } catch (err) {
+    console.warn('Puppeteer failed:', err.message);
+    return [];
   }
 }
 
@@ -137,18 +115,6 @@ function parseNFTs(html, limit = 10) {
   return result;
 }
 
-async function fetchNFTs(nft, filters = {}, limit = 10) {
-  try {
-    return await Promise.any([
-      fetchWithAxios(nft, filters, limit),
-      fetchWithPuppeteer(nft, filters, limit),
-    ]);
-  } catch (err) {
-    console.warn('All fetch methods failed:', err);
-    return [];
-  }
-}
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Only POST allowed' });
 
@@ -156,7 +122,7 @@ export default async function handler(req, res) {
   if (!nft || typeof nft !== 'string') return res.status(400).json({ error: 'Field "nft" is required.' });
 
   try {
-    const data = await fetchNFTs(nft, { backdrop, model, symbol }, limit);
+    const data = await fetchFast(nft, { backdrop, model, symbol }, limit);
     if (data.length === 0) return res.status(404).json({ error: `No NFTs found.` });
     return res.status(200).json(data);
   } catch (err) {
