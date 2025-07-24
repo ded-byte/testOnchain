@@ -2,10 +2,12 @@
   "version": 2,
   "builds": [
     { "src": "api/marketapp.js", "use": "@vercel/node" },
-    { "src": "api/antiRobot.js", "use": "@vercel/node" }
+    { "src": "api/antiRobot.js", "use": "@vercel/node" },
+    { "src": "api/gift.js", "use": "@vercel/node" }
   ],
   "routes": [
     { "src": "/api/filter", "dest": "api/marketapp.js", "methods": ["POST", "GET"] },
-    { "src": "/api/fix", "dest": "api/antiRobot.js", "methods": ["POST", "GET"] }
+    { "src": "/api/fix", "dest": "api/antiRobot.js", "methods": ["POST", "GET"] },
+    { "src": "/api/gift", "dest": "api/gift.js", "methods": ["POST", "GET"] }
   ]
 }
