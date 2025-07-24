@@ -6,7 +6,6 @@ import { findAll, getAttributeValue, textContent } from 'domutils';
 import NodeCache from 'node-cache';
 
 const cache = new NodeCache({ stdTTL: 10 });
-
 let browser;
 
 function slugify(name) {
@@ -19,16 +18,25 @@ function slugify(name) {
 }
 
 function buildAttrsParams({ backdrop, model, symbol }) {
-  const encode = str => str.replace(/\s+/g, '+');
-  const normalize = v => typeof v === 'string' ? v.trim().toLowerCase() : '';
+  const encode = str => str.trim().replace(/\s+/g, '+');
 
-  const p = [];
-  if ((backdrop = normalize(backdrop)) && backdrop !== 'all') p.push(`attrs=Backdrop___${encode(backdrop)}`);
-  if ((model = normalize(model)) && model !== 'all') p.push(`attrs=Model___${encode(model)}`);
-  if ((symbol = normalize(symbol)) && symbol !== 'all') p.push(`attrs=Symbol___${encode(symbol)}`);
+  const params = [];
 
-  return p.join('&');
+  if (typeof backdrop === 'string' && backdrop.trim().toLowerCase() !== 'all') {
+    params.push(`attrs=Backdrop___${encode(backdrop)}`);
+  }
+
+  if (typeof model === 'string' && model.trim().toLowerCase() !== 'all') {
+    params.push(`attrs=Model___${encode(model)}`);
+  }
+
+  if (typeof symbol === 'string' && symbol.trim().toLowerCase() !== 'all') {
+    params.push(`attrs=Symbol___${encode(symbol)}`);
+  }
+
+  return params.join('&');
 }
+
 
 async function getBrowser() {
   if (browser) return browser;
@@ -54,6 +62,8 @@ async function fetchWithAxios(nft, filters, limit) {
   const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
   const fullUrl = baseUrl + (buildAttrsParams(filters) ? `&${buildAttrsParams(filters)}` : '');
 
+  console.log('[FETCH]', fullUrl);
+
   const res = await axios.get(fullUrl, {
     timeout: 1000,
     headers: {
@@ -63,6 +73,7 @@ async function fetchWithAxios(nft, filters, limit) {
   });
 
   const html = res.data;
+  console.log('Axios HTML response (first 500 chars):', html.slice(0, 500));
 
   if (
     html.length < 1000 ||
@@ -95,6 +106,8 @@ async function fetchWithPuppeteer(nft, filters, limit) {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 2500 });
 
     const html = await page.content();
+    console.log('Puppeteer HTML response (first 500 chars):', html.slice(0, 500));
+
     return parseNFTs(html, limit);
   } finally {
     await page.close();
@@ -152,6 +165,7 @@ async function fetchNFTs(nft, filters = {}, limit = 10) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Only POST allowed' });
 
+  console.log('Incoming payload:', JSON.stringify(req.body, null, 2));
   const { nft, backdrop, model, symbol, limit = 10 } = req.body;
   if (!nft || typeof nft !== 'string') return res.status(400).json({ error: 'Field "nft" is required.' });
 
