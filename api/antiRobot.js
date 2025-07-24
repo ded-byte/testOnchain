@@ -5,10 +5,9 @@ import { parseDocument } from 'htmlparser2';
 import { findAll, getAttributeValue, textContent } from 'domutils';
 import NodeCache from 'node-cache';
 
-const cache = new NodeCache({ stdTTL: 10 }); // Увеличен TTL до 60 секунд
+const cache = new NodeCache({ stdTTL: 10 });
 
 let browser;
-let reusablePage; // Переиспользуемая страница для Puppeteer
 
 function slugify(name) {
   return name.toLowerCase()
@@ -44,17 +43,6 @@ async function getBrowser() {
     ignoreHTTPSErrors: true,
   });
 
-  // Инициализация переиспользуемой страницы
-  reusablePage = await browser.newPage();
-  await reusablePage.setRequestInterception(true);
-  reusablePage.on('request', req => {
-    if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
-      req.abort();
-    } else {
-      req.continue();
-    }
-  });
-
   return browser;
 }
 
@@ -66,45 +54,50 @@ async function fetchWithAxios(nft, filters, limit) {
   const baseUrl = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale`;
   const fullUrl = baseUrl + (buildAttrsParams(filters) ? `&${buildAttrsParams(filters)}` : '');
 
-  try {
-    const res = await axios.get(fullUrl, {
-      timeout: 500, // Уменьшен таймаут до 500 мс
-      headers: {
-        'User-Agent': 'Mozilla/5.0',
-        'Referer': `https://marketapp.ws/collection/${nft}/`,
-      },
-    });
+  const res = await axios.get(fullUrl, {
+    timeout: 1000,
+    headers: {
+      'User-Agent': 'Mozilla/5.0',
+      'Referer': `https://marketapp.ws/collection/${nft}/`,
+    },
+  });
 
-    const html = res.data;
+  const html = res.data;
 
-    // Проверка на наличие таблицы с данными
-    if (!html.includes('<table')) {
-      throw new Error('iritto
-
-Error: 'No data table found');
-    }
-
-    const parsed = parseNFTs(html, limit);
-    cache.set(cacheKey, parsed);
-    return parsed;
-  } catch (err) {
-    console.warn('Axios fetch failed:', err.message);
-    throw err;
+  if (
+    html.length < 1000 ||
+    html.includes('Just a moment') ||
+    html.includes('<meta name="robots" content="noindex"')
+  ) {
+    throw new Error('Bot protection triggered');
   }
+
+  const parsed = parseNFTs(html, limit);
+  cache.set(cacheKey, parsed);
+  return parsed;
 }
 
 async function fetchWithPuppeteer(nft, filters, limit) {
   const browser = await getBrowser();
+  const page = await browser.newPage();
 
   try {
-    const url = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale${buildAttrsParams(filters) ? `&${buildAttrsParams(filters)}` : ''}`;
-    await reusablePage.goto(url, { waitUntil: 'domcontentloaded', timeout: 1500 }); // Уменьшен таймаут до 1500 мс
+    await page.setRequestInterception(true);
+    page.on('request', req => {
+      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
 
-    const html = await reusablePage.content();
+    const url = `https://marketapp.ws/collection/${nft}/?market_filter_by=on_chain&tab=nfts&view=list&query=&sort_by=price_asc&filter_by=sale${buildAttrsParams(filters) ? `&${buildAttrsParams(filters)}` : ''}`;
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 2500 });
+
+    const html = await page.content();
     return parseNFTs(html, limit);
-  } catch (err) {
-    console.warn('Puppeteer fetch failed:', err.message);
-    throw err;
+  } finally {
+    await page.close();
   }
 }
 
