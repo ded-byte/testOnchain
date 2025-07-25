@@ -59,10 +59,8 @@ export default async function handler(req, res) {
     };
 
     const extractSignature = () => {
-      const footer = findAll(el =>
-        el.name === 'th' &&
-        el.attribs?.class?.includes('footer') &&
-        el.attribs?.colspan === '2',
+      const footer = findAll(
+        el => el.name === 'th' && el.attribs?.class?.includes('footer'),
         dom
       )[0];
 
