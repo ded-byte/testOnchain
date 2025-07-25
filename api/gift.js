@@ -20,7 +20,6 @@ export default async function handler(req, res) {
     const dom = parseDocument(html);
 
     const trs = DomUtils.findAll(el => el.name === 'tr', dom);
-
     const attrMap = new Map();
 
     for (const tr of trs) {
@@ -29,28 +28,36 @@ export default async function handler(req, res) {
       if (!th || !td) continue;
 
       const label = DomUtils.textContent(th).replace(/\s+/g, ' ').trim();
-
       const mark = DomUtils.findOne(el => el.name === 'mark', td);
       const value = mark ? DomUtils.textContent(mark).trim() : null;
-
       const filteredChildren = td.children.filter(c => !(c.type === 'tag' && c.name === 'mark'));
       const name = DomUtils.getText(filteredChildren).replace(/\s+/g, ' ').trim() || null;
 
       attrMap.set(label, { name, value });
     }
 
+    // Обработка Owner с поддержкой имени и ссылки
     const ownerTr = trs.find(tr => {
       const th = DomUtils.findOne(el => el.name === 'th', tr);
-      if (!th) return false;
-      return DomUtils.textContent(th).replace(/\s+/g, ' ').trim() === 'Owner';
+      return th && DomUtils.textContent(th).replace(/\s+/g, ' ').trim() === 'Owner';
     });
+
     let owner = null;
     if (ownerTr) {
-      const span = DomUtils.findOne(el => el.name === 'span', ownerTr);
-      owner = span ? DomUtils.textContent(span).trim() : null;
+      const a = DomUtils.findOne(el => el.name === 'a' && el.attribs?.href?.startsWith('https://t.me/'), ownerTr);
+      const span = DomUtils.findOne(el => el.name === 'span', a || ownerTr);
+      const name = span ? DomUtils.textContent(span).trim() : null;
+      const link = a?.attribs?.href || null;
+
+      if (name || link) {
+        owner = { name, link };
+      }
     }
 
-    const footerTh = DomUtils.findOne(el => el.name === 'th' && el.attribs?.class?.includes('footer'), dom);
+    const footerTh = DomUtils.findOne(
+      el => el.name === 'th' && el.attribs?.class?.includes('footer'),
+      dom
+    );
     const signature = footerTh ? DomUtils.textContent(footerTh).trim() : null;
 
     const result = {
