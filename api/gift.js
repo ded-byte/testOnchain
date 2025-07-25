@@ -60,14 +60,13 @@ export default async function handler(req, res) {
 
     const extractSignature = () => {
       const footer = findAll(el =>
-        el.name === 'th' && el.attribs?.class?.includes('footer'), dom
+        el.name === 'th' &&
+        el.attribs?.class?.includes('footer') &&
+        el.attribs?.colspan === '2',
+        dom
       )[0];
 
-      if (!footer) return null;
-
-      const fullText = textContent(footer);
-      const match = fullText.match(/with the comment “(.*)”/);
-      return match ? match[1].trim() : null;
+      return footer ? textContent(footer).trim() : null;
     };
 
     const result = {
