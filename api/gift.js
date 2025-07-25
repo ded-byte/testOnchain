@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   try {
     const { data: html } = await axios.get(url, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
-      timeout: 300,
+      timeout: 500,
       validateStatus: () => true,
     });
 
