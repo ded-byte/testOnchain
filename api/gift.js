@@ -11,13 +11,13 @@ export default async function handler(req, res) {
   if (!slug) return res.status(400).json({ error: 'Missing slug' });
 
   const url = `https://t.me/nft/${slug}`;
-  console.log('Fetching URL:', url); // 👈 Выводим ссылку
+  console.log('Fetching URL:', url);
 
   try {
     const { data: html } = await axios.get(url, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
       timeout: 4000,
-      validateStatus: () => true // не бросать ошибку по 404
+      validateStatus: () => true
     });
 
     const dom = parseDocument(html);
@@ -25,24 +25,21 @@ export default async function handler(req, res) {
 
     const extractAttr = (label) => {
       const row = rows.find(tr => {
-        const th = tr.children?.find(c => c.name === 'th');
+        const th = findAll(el => el.name === 'th', tr)[0];
         const text = th ? textContent(th).replace(/\s+/g, ' ').trim() : '';
-        return text.includes(label); // 👈 Более мягкая проверка
+        return text === label;
       });
 
       if (!row) return null;
 
-      const td = row.children?.find(c => c.name === 'td');
+      const td = findAll(el => el.name === 'td', row)[0];
       if (!td) return null;
 
       const mark = findAll(el => el.name === 'mark', td)[0];
       const value = mark ? textContent(mark).trim() : null;
 
-      const name = td.children
-        .filter(c => c.type === 'text')
-        .map(c => c.data?.trim())
-        .filter(Boolean)
-        .join(' ');
+      const clonedTd = { ...td, children: td.children.filter(c => c.name !== 'mark') };
+      const name = textContent(clonedTd).replace(/\s+/g, ' ').trim();
 
       return {
         name: name || null,
@@ -52,14 +49,15 @@ export default async function handler(req, res) {
 
     const extractOwner = () => {
       const row = rows.find(tr => {
-        const th = tr.children?.find(c => c.name === 'th');
+        const th = findAll(el => el.name === 'th', tr)[0];
         const text = th ? textContent(th).replace(/\s+/g, ' ').trim() : '';
-        return text.includes('Owner');
+        return text === 'Owner';
       });
 
       if (!row) return null;
-      const link = findAll(el => el.name === 'a', row)[0];
-      return getAttributeValue(link, 'href') || null;
+
+      const span = findAll(el => el.name === 'span', row)[0];
+      return span ? textContent(span).trim() : null;
     };
 
     const extractSignature = () => {
