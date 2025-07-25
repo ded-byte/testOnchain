@@ -8,9 +8,7 @@ export default async function handler(req, res) {
   }
 
   const { slug } = req.body;
-  if (!slug) {
-    return res.status(400).json({ error: 'Missing slug' });
-  }
+  if (!slug) return res.status(400).json({ error: 'Missing slug' });
 
   const url = `https://t.me/nft/${slug}`;
 
@@ -23,58 +21,67 @@ export default async function handler(req, res) {
     const dom = parseDocument(html);
     const rows = findAll(el => el.name === 'tr', dom);
 
-    const extract = (label) => {
+    const extractAttr = (label) => {
       const row = rows.find(tr => {
         const th = tr.children?.find(c => c.name === 'th');
         return th && textContent(th).trim() === label;
       });
+
       if (!row) return null;
 
       const td = row.children?.find(c => c.name === 'td');
       if (!td) return null;
 
-      const text = textContent(td).replace(/\s+/g, ' ').trim();
-      return text;
+      const mark = findAll(el => el.name === 'mark', td)[0];
+      const value = mark ? textContent(mark).trim() : null;
+
+      const name = td.children
+        .filter(c => c.type === 'text')
+        .map(c => c.data?.trim())
+        .filter(Boolean)
+        .join(' ');
+
+      return {
+        name: name || null,
+        value: value || null
+      };
     };
 
-    const extractWithMark = (label) => {
+    const extractOwner = () => {
       const row = rows.find(tr => {
         const th = tr.children?.find(c => c.name === 'th');
-        return th && textContent(th).trim() === label;
+        return th && textContent(th).trim() === 'Owner';
       });
+
       if (!row) return null;
-
-      const td = row.children?.find(c => c.name === 'td');
-      if (!td) return null;
-
-      const rawText = textContent(td).replace(/\s+/g, ' ').trim();
-      return rawText;
+      const link = findAll(el => el.name === 'a', row)[0];
+      return getAttributeValue(link, 'href') || null;
     };
 
-    const ownerRow = rows.find(tr => {
-      const th = tr.children?.find(c => c.name === 'th');
-      return th && textContent(th).trim() === 'Owner';
-    });
+    const extractSignature = () => {
+      const footer = findAll(el =>
+        el.name === 'th' && el.attribs?.class?.includes('footer'), dom
+      )[0];
 
-    const owner = ownerRow
-      ? getAttributeValue(findAll(el => el.name === 'a', ownerRow)[0], 'href')
-      : null;
+      if (!footer) return null;
 
-    const footer = findAll(el => el.attribs?.class === 'footer', dom)[0];
-    const signature = footer
-      ? textContent(footer).split(' with the comment “')[1]?.replace(/”$/, '').trim()
-      : null;
+      const fullText = textContent(footer);
+      const match = fullText.match(/with the comment “(.*)”/);
+      return match ? match[1].trim() : null;
+    };
 
-    return res.status(200).json({
-      owner,
-      model: extractWithMark('Model'),
-      backdrop: extractWithMark('Backdrop'),
-      symbol: extractWithMark('Symbol'),
-      signature
-    });
+    const result = {
+      owner: extractOwner(),
+      model: extractAttr('Model'),
+      backdrop: extractAttr('Backdrop'),
+      symbol: extractAttr('Symbol'),
+      signature: extractSignature()
+    };
+
+    return res.status(200).json(result);
 
   } catch (err) {
-    console.error('Fetch/parsing error:', err);
-    return res.status(500).json({ error: 'Failed to parse NFT page', detail: err.message });
+    console.error('Parse error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch or parse', detail: err.message });
   }
 }
