@@ -11,11 +11,13 @@ export default async function handler(req, res) {
   if (!slug) return res.status(400).json({ error: 'Missing slug' });
 
   const url = `https://t.me/nft/${slug}`;
+  console.log('Fetching URL:', url); // 👈 Выводим ссылку
 
   try {
     const { data: html } = await axios.get(url, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
-      timeout: 4000
+      timeout: 4000,
+      validateStatus: () => true // не бросать ошибку по 404
     });
 
     const dom = parseDocument(html);
@@ -24,7 +26,8 @@ export default async function handler(req, res) {
     const extractAttr = (label) => {
       const row = rows.find(tr => {
         const th = tr.children?.find(c => c.name === 'th');
-        return th && textContent(th).trim() === label;
+        const text = th ? textContent(th).replace(/\s+/g, ' ').trim() : '';
+        return text.includes(label); // 👈 Более мягкая проверка
       });
 
       if (!row) return null;
@@ -50,7 +53,8 @@ export default async function handler(req, res) {
     const extractOwner = () => {
       const row = rows.find(tr => {
         const th = tr.children?.find(c => c.name === 'th');
-        return th && textContent(th).trim() === 'Owner';
+        const text = th ? textContent(th).replace(/\s+/g, ' ').trim() : '';
+        return text.includes('Owner');
       });
 
       if (!row) return null;
