@@ -4,6 +4,7 @@ import { DomUtils } from 'htmlparser2';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Only POST allowed' });
+
   const { slug } = req.body;
   if (!slug) return res.status(400).json({ error: 'Missing slug' });
 
@@ -18,7 +19,6 @@ export default async function handler(req, res) {
     });
 
     const dom = parseDocument(html);
-
     const trs = DomUtils.findAll(el => el.name === 'tr', dom);
     const attrMap = new Map();
 
@@ -30,6 +30,7 @@ export default async function handler(req, res) {
       const label = DomUtils.textContent(th).replace(/\s+/g, ' ').trim();
       const mark = DomUtils.findOne(el => el.name === 'mark', td);
       const value = mark ? DomUtils.textContent(mark).trim() : null;
+
       const filteredChildren = td.children.filter(c => !(c.type === 'tag' && c.name === 'mark'));
       const name = DomUtils.getText(filteredChildren).replace(/\s+/g, ' ').trim() || null;
 
@@ -47,10 +48,7 @@ export default async function handler(req, res) {
       const span = DomUtils.findOne(el => el.name === 'span', a || ownerTr);
       const name = span ? DomUtils.textContent(span).trim() : null;
       const link = a?.attribs?.href || null;
-
-      if (name || link) {
-        owner = { name, link };
-      }
+      if (name || link) owner = { name, link };
     }
 
     const footerTh = DomUtils.findOne(
@@ -59,15 +57,25 @@ export default async function handler(req, res) {
     );
     const signature = footerTh ? DomUtils.textContent(footerTh).trim() : null;
 
-    const result = {
+    let title = null;
+    const slugMatch = slug.match(/^([A-Za-z]+)-(\d+)$/);
+    if (slugMatch) {
+      const [_, name, number] = slugMatch;
+      title = `${capitalize(name)} #${number}`;
+    }
+
+    function capitalize(str) {
+      return str.charAt(0).toUpperCase() + str.slice(1);
+    }
+
+    return res.status(200).json({
+      title,
       owner,
       model: attrMap.get('Model') || null,
       backdrop: attrMap.get('Backdrop') || null,
       symbol: attrMap.get('Symbol') || null,
       signature,
-    };
-
-    return res.status(200).json(result);
+    });
   } catch (err) {
     console.error('Parse error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch or parse', detail: err.message });
